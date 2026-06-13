@@ -1,0 +1,402 @@
+"""Interactive terminal client — the first playable Trader PRO (V1.1).
+
+Run it:
+    python -m trader_pro            # or:  python play.py
+
+The command logic lives in `TraderApp.execute(line) -> str`, which is pure and testable.
+`repl()` is the thin interactive loop on top of it.
+
+Design references: design.md §5.5 (speed control), §8.1 (UI surface), §8.2 (loans — stub
+hook here, full system in V1.5).
+"""
+
+from __future__ import annotations
+
+import shlex
+import sys
+import time
+from pathlib import Path
+
+from .core import (
+    load_seed_universe, World, MarketEngine, AssetKind, make_asset_id,
+    Order, OrderSide, execute_order, save_world, load_world, PROFILE_NAMES, get_profile,
+)
+from .core.engine import DAY, HOUR
+
+ROOT = Path(__file__).resolve().parents[1]
+SAVES_DIR = ROOT / "saves"
+SPARK = "▁▂▃▄▅▆▇█"
+
+
+# --------------------------------------------------------------------------- #
+# Small formatting helpers
+# --------------------------------------------------------------------------- #
+
+class C:
+    GREEN = "\033[32m"; RED = "\033[31m"; DIM = "\033[2m"
+    BOLD = "\033[1m"; CYAN = "\033[36m"; YELLOW = "\033[33m"; RESET = "\033[0m"
+
+
+def _color_enabled() -> bool:
+    return sys.stdout.isatty()
+
+
+def col(s: str, c: str) -> str:
+    return f"{c}{s}{C.RESET}" if _color_enabled() else s
+
+
+def money(x: float) -> str:
+    return f"${x:,.2f}"
+
+
+def signed_pct(p0: float, p1: float) -> str:
+    if p0 <= 0:
+        return "  --  "
+    p = (p1 / p0 - 1) * 100
+    s = f"{p:+.2f}%"
+    return col(s, C.GREEN if p >= 0 else C.RED) if _color_enabled() else s
+
+
+def fmt_clock(t: int) -> str:
+    d = t // DAY; h = (t % DAY) // HOUR; m = t % HOUR
+    return f"D{d} {h:02d}:{m:02d}"
+
+
+def sparkline(vals: list[float]) -> str:
+    if not vals:
+        return ""
+    lo, hi = min(vals), max(vals)
+    if hi - lo < 1e-12:
+        return SPARK[0] * len(vals)
+    return "".join(SPARK[int((v - lo) / (hi - lo) * (len(SPARK) - 1))] for v in vals)
+
+
+# --------------------------------------------------------------------------- #
+# The app
+# --------------------------------------------------------------------------- #
+
+class TraderApp:
+    def __init__(self, world: World | None = None, *, universe=None):
+        self.universe = universe or load_seed_universe()
+        self.world = world or World.new(self.universe, world_seed=20260614, profile="Normal")
+        self.engine = MarketEngine(self.world)
+        self.running = True
+
+    # ---- symbol resolution ---- #
+
+    def resolve(self, token: str) -> str | None:
+        token = token.strip().upper()
+        for kind in (AssetKind.STOCK, AssetKind.CRYPTO, AssetKind.BOND):
+            aid = make_asset_id(kind, token)
+            if self.world.has_asset(aid):
+                return aid
+        if self.world.has_asset(token):       # already a full id
+            return token
+        return None
+
+    # ---- the dashboard header ---- #
+
+    def header(self) -> str:
+        w = self.world
+        eq = w.equity()
+        ret = (eq / w.config.starting_cash - 1) * 100
+        rets = col(f"{ret:+.1f}%", C.GREEN if ret >= 0 else C.RED)
+        bar = col("TRADER PRO", C.BOLD + C.CYAN)
+        return (
+            f"{bar}  seed {w.config.world_seed} · {w.config.profile} · {fmt_clock(w.market.tick_index)}\n"
+            f"  cash {money(w.portfolio.cash)}   equity {money(eq)}   "
+            f"return {rets}   sentiment {w.market.sentiment:+.2f}   rate {w.market.interest_rate*100:.2f}%"
+        )
+
+    # ---- rendering an asset row ---- #
+
+    def _row(self, aid: str) -> str:
+        t = self.world.market.tick_index
+        price = self.world.price(aid)
+        day_ago = self.engine.price_at(aid, max(0, t - DAY))
+        spark = sparkline([self.engine.price_at(aid, max(0, t - DAY + i * (DAY // 16))) for i in range(16)])
+        sym = aid.split(":", 1)[1]
+        return (f"  {sym:<11} {money(price):>14}  {signed_pct(day_ago, price):>16}  "
+                f"{col(spark, C.DIM)}  {self.world.name_of(aid)[:24]}")
+
+    def _list_kind(self, kind: AssetKind, n: int) -> str:
+        ids = [a for a in self.world.asset_ids() if self.world.kind_of(a) is kind][:n]
+        head = f"  {'SYMBOL':<11} {'PRICE':>14}  {'1D':>9}  {'~24h':<16}  NAME"
+        return col(head, C.DIM) + "\n" + "\n".join(self._row(a) for a in ids)
+
+    # ---- command dispatch ---- #
+
+    def execute(self, line: str) -> str:
+        line = line.strip()
+        if not line:
+            return ""
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            parts = line.split()
+        cmd, args = parts[0].lower(), parts[1:]
+
+        handler = {
+            "help": self._help, "?": self._help,
+            "market": self._market, "m": self._market,
+            "stocks": lambda a: self._kind_cmd(AssetKind.STOCK, a),
+            "bonds": lambda a: self._kind_cmd(AssetKind.BOND, a),
+            "crypto": lambda a: self._kind_cmd(AssetKind.CRYPTO, a),
+            "find": self._find,
+            "look": self._look, "l": self._look,
+            "buy": self._buy, "b": self._buy,
+            "sell": self._sell, "s": self._sell,
+            "port": self._port, "portfolio": self._port, "p": self._port,
+            "next": self._next, "n": self._next,
+            "step": lambda a: self._next(["1"]),
+            "hour": lambda a: self._next([str(HOUR)]),
+            "day": lambda a: self._next([str(DAY)]),
+            "run": self._run,
+            "save": self._save, "load": self._load,
+            "quit": self._quit, "exit": self._quit, "q": self._quit,
+        }.get(cmd)
+
+        if handler is None:
+            return col(f"unknown command {cmd!r} — type 'help'", C.YELLOW)
+        return handler(args)
+
+    # ---- individual commands ---- #
+
+    def _help(self, args) -> str:
+        return (
+            "commands:\n"
+            "  market | m                overview: your holdings + the crypto board\n"
+            "  stocks [n] | bonds | crypto [n]   list a kind\n"
+            "  find <text>               search stocks/assets by name or symbol\n"
+            "  look <SYM> | l            asset detail + recent path\n"
+            "  buy  <SYM> <qty|$amount>  e.g. 'buy AAPL 10' or 'buy BTR $500'\n"
+            "  sell <SYM> <qty|all>      e.g. 'sell AAPL 5' or 'sell BTR all'\n"
+            "  port | p                  your portfolio & P&L\n"
+            "  step | hour | day         advance 1 min / 1 hour / 1 day\n"
+            "  next <ticks>              advance N minutes\n"
+            "  run <ticks> [delay]       live auto-advance (delay sec/tick, default 0.05)\n"
+            "  save [name] | load [name] persist the world\n"
+            "  quit\n"
+            "  (1 tick = 1 simulated minute)"
+        )
+
+    def _market(self, args) -> str:
+        out = [self.header(), ""]
+        holds = self.world.portfolio.positions
+        if holds:
+            out.append(col("  — your holdings —", C.DIM))
+            out.append("\n".join(self._row(a) for a in holds))
+            out.append("")
+        out.append(col("  — crypto board —", C.DIM))
+        out.append(self._list_kind(AssetKind.CRYPTO, 99))
+        out.append(col("\n  (try: stocks 15 · bonds · find tech · look BTR)", C.DIM))
+        return "\n".join(out)
+
+    def _kind_cmd(self, kind: AssetKind, args) -> str:
+        n = int(args[0]) if args and args[0].isdigit() else (20 if kind is AssetKind.STOCK else 99)
+        return self._list_kind(kind, n)
+
+    def _find(self, args) -> str:
+        if not args:
+            return "usage: find <text>"
+        q = " ".join(args).lower()
+        hits = [a for a in self.world.asset_ids()
+                if q in self.world.name_of(a).lower() or q in a.split(":", 1)[1].lower()]
+        if not hits:
+            return f"no matches for {q!r}"
+        head = col(f"  {'SYMBOL':<11} {'PRICE':>14}  {'1D':>9}  {'~24h':<16}  NAME", C.DIM)
+        return head + "\n" + "\n".join(self._row(a) for a in hits[:25]) + \
+            (f"\n  …and {len(hits)-25} more" if len(hits) > 25 else "")
+
+    def _look(self, args) -> str:
+        if not args:
+            return "usage: look <SYMBOL>"
+        aid = self.resolve(args[0])
+        if not aid:
+            return col(f"unknown symbol {args[0]!r}", C.YELLOW)
+        t = self.world.market.tick_index
+        meta = self.world.meta_of(aid)
+        path = [self.engine.price_at(aid, max(0, t - 3 * DAY + i * (3 * DAY // 48))) for i in range(48)]
+        lines = [
+            col(f"{aid.split(':',1)[1]}  {self.world.name_of(aid)}", C.BOLD),
+            f"  price {money(self.world.price(aid))}   "
+            f"1h {signed_pct(self.engine.price_at(aid, max(0,t-HOUR)), self.world.price(aid))}   "
+            f"1d {signed_pct(self.engine.price_at(aid, max(0,t-DAY)), self.world.price(aid))}",
+            f"  3-day path  {col(sparkline(path), C.CYAN)}",
+        ]
+        kind = self.world.kind_of(aid)
+        if kind is AssetKind.STOCK:
+            lines.append(f"  sector {meta.sector} · vol {meta.volatility:.0%} · growth {meta.growth_rate:+.0%}")
+        elif kind is AssetKind.BOND:
+            lines.append(f"  {meta.issuer_type} {meta.rating} · coupon {meta.coupon_rate:.2%} · "
+                         f"{meta.maturity_years:.0f}y · default risk {meta.default_prob:.2%}")
+        else:
+            lines.append(f"  {meta.archetype} · vol {meta.volatility:.0%} · "
+                         f"anchor strength {meta.fundamental_strength:.0%}")
+        held = self.world.portfolio.positions.get(aid)
+        if held:
+            lines.append(col(f"  you hold {held.quantity:g} @ avg {money(held.avg_cost)}", C.DIM))
+        return "\n".join(lines)
+
+    def _parse_qty(self, aid: str, token: str) -> float | None:
+        token = token.lower()
+        if token == "all":
+            held = self.world.portfolio.positions.get(aid)
+            return held.quantity if held else 0.0
+        if token.startswith("$"):
+            try:
+                return float(token[1:]) / self.world.price(aid)
+            except ValueError:
+                return None
+        try:
+            return float(token)
+        except ValueError:
+            return None
+
+    def _buy(self, args) -> str:
+        if len(args) < 2:
+            return "usage: buy <SYMBOL> <qty|$amount>"
+        aid = self.resolve(args[0])
+        if not aid:
+            return col(f"unknown symbol {args[0]!r}", C.YELLOW)
+        qty = self._parse_qty(aid, args[1])
+        if qty is None or qty <= 0:
+            return "invalid quantity"
+        res = execute_order(self.world, Order(aid, OrderSide.BUY, qty))
+        if res.filled:
+            return col(f"bought {qty:g} {args[0].upper()} @ {money(res.price)} "
+                       f"(−{money(-res.cash_delta)})  cash {money(self.world.portfolio.cash)}", C.GREEN)
+        return col(f"order rejected: {res.message}", C.RED)
+
+    def _sell(self, args) -> str:
+        if len(args) < 2:
+            return "usage: sell <SYMBOL> <qty|all>"
+        aid = self.resolve(args[0])
+        if not aid:
+            return col(f"unknown symbol {args[0]!r}", C.YELLOW)
+        qty = self._parse_qty(aid, args[1])
+        if qty is None or qty <= 0:
+            return "invalid quantity"
+        res = execute_order(self.world, Order(aid, OrderSide.SELL, qty))
+        if res.filled:
+            pnl = col(f"{res.realized_pnl:+,.2f}", C.GREEN if res.realized_pnl >= 0 else C.RED)
+            return col(f"sold {qty:g} {args[0].upper()} @ {money(res.price)} "
+                       f"(+{money(res.cash_delta)}) realized P&L {pnl}  "
+                       f"cash {money(self.world.portfolio.cash)}", C.GREEN)
+        return col(f"order rejected: {res.message}", C.RED)
+
+    def _port(self, args) -> str:
+        w = self.world; pf = w.portfolio
+        out = [self.header(), ""]
+        if not pf.positions:
+            out.append("  (no holdings — try 'buy BTR $500')")
+        else:
+            out.append(col(f"  {'SYMBOL':<11}{'QTY':>10}{'AVG':>12}{'PRICE':>12}"
+                           f"{'VALUE':>13}{'P&L':>14}", C.DIM))
+            for aid, pos in pf.positions.items():
+                price = w.price(aid)
+                val = price * pos.quantity
+                pnl = (price - pos.avg_cost) * pos.quantity
+                pnlpct = (price / pos.avg_cost - 1) * 100 if pos.avg_cost else 0
+                pnls = col(f"{pnl:+,.2f} ({pnlpct:+.1f}%)", C.GREEN if pnl >= 0 else C.RED)
+                out.append(f"  {aid.split(':',1)[1]:<11}{pos.quantity:>10g}{money(pos.avg_cost):>12}"
+                           f"{money(price):>12}{money(val):>13}{pnls:>22}")
+        hv = pf.holdings_value(w.price_of)
+        out.append("")
+        out.append(f"  cash {money(pf.cash)}   holdings {money(hv)}   equity {money(pf.cash+hv)}")
+        out.append(f"  realized P&L {money(pf.realized_pnl)}   "
+                   f"unrealized {money(pf.unrealized_pnl(w.price_of))}")
+        return "\n".join(out)
+
+    def _advance(self, ticks: int) -> None:
+        self.engine.advance(ticks)
+
+    def _next(self, args) -> str:
+        ticks = int(args[0]) if args and args[0].lstrip("-").isdigit() else HOUR
+        if ticks <= 0:
+            return "advance by a positive number of minutes"
+        self._advance(ticks)
+        return col(f"⏩ advanced {ticks} min → {fmt_clock(self.world.market.tick_index)}", C.DIM) \
+            + "\n" + self.header()
+
+    def _run(self, args) -> str:
+        ticks = int(args[0]) if args and args[0].isdigit() else HOUR
+        delay = float(args[1]) if len(args) > 1 else 0.05
+        live = _color_enabled()
+        for _ in range(ticks):
+            self._advance(1)
+            if live:
+                sys.stdout.write("\r" + self.header().splitlines()[1] + "   ")
+                sys.stdout.flush()
+                time.sleep(delay)
+        if live:
+            sys.stdout.write("\n")
+        return col(f"⏩ ran {ticks} min → {fmt_clock(self.world.market.tick_index)}", C.DIM)
+
+    def _save(self, args) -> str:
+        name = (args[0] if args else "save") + ".world"
+        path = SAVES_DIR / name
+        save_world(self.world, path)
+        return col(f"saved → {path.name}", C.CYAN)
+
+    def _load(self, args) -> str:
+        name = (args[0] if args else "save") + ".world"
+        path = SAVES_DIR / name
+        if not path.exists():
+            return col(f"no save named {path.name}", C.YELLOW)
+        self.world = load_world(path, self.universe)
+        self.engine = MarketEngine(self.world)
+        return col(f"loaded ← {path.name}", C.CYAN) + "\n" + self.header()
+
+    def _quit(self, args) -> str:
+        self.running = False
+        return col("see you out there, trader.", C.CYAN)
+
+
+# --------------------------------------------------------------------------- #
+# Interactive loop + world setup
+# --------------------------------------------------------------------------- #
+
+def _prompt_new_world(universe) -> World:
+    print(col("\n  TRADER PRO — new world\n", C.BOLD + C.CYAN))
+    print("  Volatility profiles:")
+    for p in (get_profile(n) for n in PROFILE_NAMES):
+        print(f"    {p.level} {p.name:<12} {p.tagline}")
+    raw = input("\n  profile [4=Normal]: ").strip() or "4"
+    try:
+        profile = PROFILE_NAMES[int(raw) - 1] if raw.isdigit() else raw
+        get_profile(profile)
+    except (ValueError, IndexError):
+        profile = "Normal"
+    seed_raw = input("  world seed [20260614]: ").strip()
+    seed = int(seed_raw) if seed_raw.lstrip("-").isdigit() else 20260614
+    cash_raw = input("  starting cash [2500]: ").strip()
+    cash = float(cash_raw) if cash_raw.replace(".", "").isdigit() else 2500.0
+    return World.new(universe, world_seed=seed, profile=profile, starting_cash=cash)
+
+
+def repl() -> None:
+    universe = load_seed_universe()
+    print(col("Welcome to Trader PRO.", C.BOLD + C.CYAN))
+    choice = input("  [n]ew world or [l]oad a save? [n]: ").strip().lower()
+    if choice.startswith("l"):
+        app = TraderApp(universe=universe)
+        name = input("  save name [save]: ").strip() or "save"
+        print(app.execute(f"load {name}"))
+    else:
+        app = TraderApp(_prompt_new_world(universe), universe=universe)
+    print("\n" + app.execute("market"))
+    print(col("\nType 'help' for commands.\n", C.DIM))
+    while app.running:
+        try:
+            line = input(col("trader> ", C.BOLD))
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        out = app.execute(line)
+        if out:
+            print(out)
+
+
+if __name__ == "__main__":
+    repl()

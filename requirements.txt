@@ -1,0 +1,3 @@
+# Seed generation (scripts/build_seed.py) uses only the standard library.
+# The simulation engine (V0.2+) will use:
+numpy>=1.24

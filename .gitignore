@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Saves / runtime world state (not the seed files, which are committed)
+saves/
+*.world
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

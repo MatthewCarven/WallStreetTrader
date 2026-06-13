@@ -1,0 +1,110 @@
+[
+  {
+    "symbol": "BTR",
+    "name": "Bitron",
+    "archetype": "store-of-value",
+    "fair_value": 45000.0,
+    "volatility": 0.65,
+    "fundamental_strength": 0.5,
+    "circulating_supply": 19500000.0
+  },
+  {
+    "symbol": "GILD",
+    "name": "Gildcoin",
+    "archetype": "store-of-value",
+    "fair_value": 320.0,
+    "volatility": 0.7,
+    "fundamental_strength": 0.4,
+    "circulating_supply": 60000000.0
+  },
+  {
+    "symbol": "ETA",
+    "name": "Ethera",
+    "archetype": "platform",
+    "fair_value": 2800.0,
+    "volatility": 0.75,
+    "fundamental_strength": 0.45,
+    "circulating_supply": 120000000.0
+  },
+  {
+    "symbol": "SLR",
+    "name": "Solaris",
+    "archetype": "platform",
+    "fair_value": 95.0,
+    "volatility": 0.95,
+    "fundamental_strength": 0.35,
+    "circulating_supply": 450000000.0
+  },
+  {
+    "symbol": "QNT",
+    "name": "Quanta",
+    "archetype": "platform",
+    "fair_value": 55.0,
+    "volatility": 0.9,
+    "fundamental_strength": 0.35,
+    "circulating_supply": 250000000.0
+  },
+  {
+    "symbol": "NMB",
+    "name": "Nimbus",
+    "archetype": "platform",
+    "fair_value": 12.0,
+    "volatility": 1.0,
+    "fundamental_strength": 0.3,
+    "circulating_supply": 1200000000.0
+  },
+  {
+    "symbol": "VLTX",
+    "name": "VaultX",
+    "archetype": "defi",
+    "fair_value": 18.0,
+    "volatility": 1.05,
+    "fundamental_strength": 0.25,
+    "circulating_supply": 800000000.0
+  },
+  {
+    "symbol": "LNR",
+    "name": "Lunar",
+    "archetype": "defi",
+    "fair_value": 1.4,
+    "volatility": 1.4,
+    "fundamental_strength": 0.15,
+    "circulating_supply": 2000000000.0
+  },
+  {
+    "symbol": "BONE",
+    "name": "Dogebone",
+    "archetype": "meme",
+    "fair_value": 0.08,
+    "volatility": 1.3,
+    "fundamental_strength": 0.1,
+    "circulating_supply": 140000000000.0
+  },
+  {
+    "symbol": "FRG",
+    "name": "Froggo",
+    "archetype": "meme",
+    "fair_value": 1.2e-05,
+    "volatility": 1.5,
+    "fundamental_strength": 0.05,
+    "circulating_supply": 420000000000.0
+  },
+  {
+    "symbol": "MEMZ",
+    "name": "Memez",
+    "archetype": "meme",
+    "fair_value": 0.0021,
+    "volatility": 1.45,
+    "fundamental_strength": 0.06,
+    "circulating_supply": 90000000000.0
+  },
+  {
+    "symbol": "SUSD",
+    "name": "StableUSD",
+    "archetype": "stablecoin",
+    "fair_value": 1.0,
+    "volatility": 0.02,
+    "fundamental_strength": 0.98,
+    "circulating_supply": 80000000000.0
+  }
+]
