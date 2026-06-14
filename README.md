@@ -51,6 +51,10 @@ Pick a volatility profile and a world seed, then trade. Key commands:
 - `buy AAPL 10` / `buy BTR $500` — buy by quantity or by dollar amount
 - `sell BTR all` — sell a holding
 - `port` — portfolio and P&L
+- `short SLR 50` / `cover SLR all` — short selling (buying uses up to 2:1 margin)
+- `predict BTR 1d` — buy a forecast (accuracy depends on the world's profile)
+- `loan 1500` / `repay all` — borrow to recover (no game-over); rate scales with size
+- `news` — recent market headlines (earnings, crashes, black swans)
 - `step` / `hour` / `day` / `next 90` — advance simulated time (1 tick = 1 minute)
 - `run 120` — live auto-advance
 - `save` / `load` — persist the world

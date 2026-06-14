@@ -46,13 +46,17 @@ def test_buy_then_sell_updates_cash_and_realized_pnl() -> None:
     assert abs(sell.realized_pnl) < 1e-6
 
 
-def test_cannot_overspend_or_oversell() -> None:
+def test_overspend_rejected_but_small_short_allowed() -> None:
     w = World.new(UNIVERSE, world_seed=1, starting_cash=50.0)
     aid = _a_stock_id()
-    # Buying 100k of anything on $50 must fail.
+    # Buying 100k of anything on $50 blows the margin limit -> rejected.
     assert not execute_order(w, Order(aid, OrderSide.BUY, 100_000)).filled
-    # Selling something we don't hold must fail (no shorting in V0.2).
-    assert not execute_order(w, Order(aid, OrderSide.SELL, 1)).filled
+    # A tiny short IS allowed now (V1.3): proceeds + equity cover initial margin.
+    res = execute_order(w, Order(aid, OrderSide.SELL, 1))
+    assert res.filled
+    assert w.portfolio.positions[aid].quantity == -1   # negative = short
+    # But shorting 100k is far beyond buying power -> rejected.
+    assert not execute_order(w, Order(aid, OrderSide.SELL, 100_000)).filled
 
 
 def test_equity_conserved_by_trading() -> None:

@@ -437,10 +437,12 @@ or post-V1 expansion.)*
 
 ## 10. Remaining open questions 🟡 (all tuning, none block V0)
 
-1. **Loan tiers** — base rate, the leverage-ratio → rate curve, per-tick compounding, and
-   the borrowing-limit ceiling. Starting cash is set at **$2,500**. (§8.2)
-2. **Prediction economy** — the pricing curve (by tier and by company obscurity), refresh
-   rate, and how steeply accuracy degrades from *Calm* to *Apocalyptic*. (§5.4)
+1. ~~**Loan tiers**~~ ✅ Implemented in V1.5: APR by leverage ratio (≤0.25→6%, ≤0.75→12%,
+   ≤1.5→22%, else 35%), per-minute compounding, borrow limit ≈2× net worth (with a $1,000
+   hardship floor so you can always get back in). Starting cash **$2,500**. (`portfolio.py`)
+2. ~~**Prediction economy**~~ ✅ Implemented in V1.5: cost = base × obscurity (mega-cap cheap,
+   small-cap & crypto dear) × horizon; forecast noise = (1−predictability)·√horizon, so
+   accuracy degrades Calm→Apocalyptic. (`predictions.py`, §5.4)
 3. ~~**Profile coefficients** — the numbers behind the 8 levels.~~ ✅ Locked in V0.5
    (table in §4.5; `trader_pro/core/profiles.py`).
 

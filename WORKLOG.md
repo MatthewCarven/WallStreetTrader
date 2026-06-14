@@ -123,3 +123,73 @@ Everything is already covered by `.gitignore` (saves/, __pycache__, etc.).
 
 **Next (V1.2):** flesh out stocks+bonds play and the speed/auto-run loop; then V1.3
 crypto already tradable → add margin & short selling.
+
+## 2026-06-14 — V1.3 margin & short selling ✅
+
+- Rewrote `portfolio.py` to a **unified signed model**: positions can be negative (shorts),
+  cash can be negative (margin debt). Added equity / gross_exposure / buying_power /
+  maintenance_excess / is_margin_call. `apply_fill` handles open/extend/reduce/flip-across-zero.
+- Margin ratios: INITIAL 0.50 (2:1 leverage), MAINTENANCE 0.25.
+- `orders.py`: initial-margin check on any exposure-increasing trade; reducing always
+  allowed. New `liquidate_for_margin(world)` force-closes largest-first until maintenance
+  is restored (the hook V1.4 cascades will use).
+- CLI: `short` / `cover` commands; `buy` now leverages up to 2:1; `port` & header show
+  gross exposure, buying power, margin debt, and a ⚠ MARGIN CALL flag; advancing time
+  auto-liquidates underwater accounts and prints the forced closures.
+- Tests: updated `test_world` for the new short behaviour; new `tests/test_margin.py`
+  (leverage cap, over-leverage reject, short profits on a drop, long→short flip, margin-call
+  liquidation). **Full suite: 6 files, all green.**
+- Demo: a 1.5x short in a Volatile world got margin-called and liquidated for a −70% hit —
+  the "epic fail" path works end to end.
+
+**Next (V1.2 backfill / V1.4):** richer stock/bond UX & live run loop polish; then V1.4 —
+discrete events, black swans, and crash *cascades* (using event_rate_mult / cascade_mult).
+
+## 2026-06-14 — V1.4 events, black swans & crash cascades ✅
+
+- New `trader_pro/core/events.py`: a **seeded, deterministic** event schedule so prices stay
+  a pure function of (seed, tick) — fast-forward/replay still exact. Events apply a decaying
+  log-price impact over a bounded look-back window.
+  - Micro (single-asset earnings / crypto moves), macro (sector rotations), and **black
+    swans** — rare market-wide plunges that spawn a burst of correlated **aftershocks**
+    (the cascade) over the following days, with slow partial recovery.
+  - Frequency scales with profile.event_rate_mult; swan severity & aftershock count with
+    cascade_mult. Black swans/yr: Calm 2 → Normal 4 → Volatile 14 → Apocalyptic 19.
+- Engine: stocks/crypto take the log impact (stablecoins shrug it off via fundamental
+  strength); bonds get an inverse **flight-to-safety** bump when the market drops.
+- CLI: `news` command (recent headlines) + event tickers and a ▼ MARGIN-CALL cascade
+  surfaced when you advance time. Headlines are templated per event kind.
+- Tests `tests/test_events.py` (5): determinism, fast-forward-exact with events, swan
+  frequency scales with profile, a swan really crashes the market, news/fired_between.
+- `scripts/cascade_demo.py` -> `cascade_chart.png`: a Volatile-world flash crash with
+  44 aftershocks; market index −60%, crypto craters, **bonds jump on flight to safety**.
+
+**Daily-vol now includes fat tails: Calm 2.4% → Normal 5.6% → Volatile 18% → Apocalyptic
+36% (events-driven crashes). Lively; high-profile severity is a balancing knob for later.**
+
+**Full suite: 7 files, ~40 tests, all green.**
+
+**Next (V1.5):** loans (no game-over) + buyable predictions (accuracy capped by profile
+predictability). Then the TUI front-end Matthew wants.
+
+## 2026-06-14 — V1.5 loans & buyable predictions ✅  (V1 milestone complete)
+
+- Loans (`portfolio.py`): `Loan` model; `take_loan` with APR by leverage ratio
+  (6/12/22/35%), borrow limit ≈2× net worth + $1,000 hardship floor (always a way back in);
+  per-minute compounding via `accrue_interest`; `repay` (highest-APR first); `net_worth`
+  nets out debt. Serialized. `world.net_worth()` now subtracts loans. No game-over.
+- Predictions (`predictions.py`): seeded forecast of an asset's future price; noise =
+  (1−profile.predictability)·√horizon, so Calm worlds are sharp, Apocalyptic fuzzy; cost
+  scales with obscurity (mega-cap cheap, small-cap/crypto dear) and horizon. Deterministic
+  per (seed, tick, asset, horizon) — no save-scum rerolls.
+- CLI: `loan` / `repay` / `predict` commands; header & `port` now show net worth (with
+  return), loan balance, and margin debt; loan interest accrues as time advances.
+- Tests: `test_loans.py` (6) + `test_predictions.py` (4). **Full suite: 9 files, ~50 tests,
+  all green.** Demo confirms the wipeout → loan → forecast → trade-back → repay loop.
+- design.md §10 items 1 & 2 marked resolved with the locked numbers.
+
+**🎉 V1 is feature-complete: 4 asset classes, longs/shorts/leverage, margin calls, 8 market
+personalities, events + black-swan cascades, loans, predictions, save/load, seeded worlds.**
+
+**Next:** the **TUI** front-end Matthew wants (Textual/rich over the existing TraderApp), or
+balance-tuning the high-volatility profiles. V2 (web) / V3 (multiplayer) later.

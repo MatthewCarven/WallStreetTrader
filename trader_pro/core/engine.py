@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from .models import BondSeed, CryptoSeed, StockSeed
 from .world import AssetKind, World
 from .profiles import MarketProfile, get_profile, PROFILE_BY_NAME
+from .events import EventSchedule
 
 # --------------------------------------------------------------------------- #
 # Time layers (periods in ticks/minutes)
@@ -226,6 +227,7 @@ class MarketEngine:
         self.world = world
         self.coeffs = get_profile(world.config.profile)
         self.base_rate = base_rate if base_rate is not None else world.market.interest_rate
+        self.events = EventSchedule(world.config.world_seed, world.universe, self.coeffs)
         self.recompute()
 
     # ---- price evaluation ---- #
@@ -234,11 +236,18 @@ class MarketEngine:
         kind = self.world.kind_of(asset_id)
         meta = self.world.meta_of(asset_id)
         seed = self.world.config.world_seed
+        imp = self.events.impacts_at(t)
         if kind is AssetKind.STOCK:
-            return stock_price_at(seed, meta, t, self.coeffs)
+            base = stock_price_at(seed, meta, t, self.coeffs)
+            return base * math.exp(imp.for_asset(asset_id, "STOCK", meta.sector))
         if kind is AssetKind.CRYPTO:
-            return crypto_price_at(seed, meta, t, self.coeffs)
-        return bond_price_at(seed, meta, t, self.base_rate, self.coeffs)
+            base = crypto_price_at(seed, meta, t, self.coeffs)
+            # strong-anchor coins (stablecoins) shrug off shocks; weak-anchor coins amplify
+            ev = imp.for_asset(asset_id, "CRYPTO", "") * (1.0 - meta.fundamental_strength)
+            return base * math.exp(ev)
+        base = bond_price_at(seed, meta, t, self.base_rate, self.coeffs)
+        # flight to safety: market shocks nudge bonds the other way
+        return max(1.0, base * math.exp(-0.12 * imp.market))
 
     def recompute(self) -> None:
         """Re-evaluate every global factor and price at the world's current tick."""

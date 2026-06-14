@@ -13,7 +13,7 @@ from .models import (
     load_seed_universe,
 )
 from .portfolio import Portfolio, Position
-from .orders import Order, OrderSide, ExecutionResult, execute_order
+from .orders import Order, OrderSide, ExecutionResult, execute_order, liquidate_for_margin
 from .world import (
     World,
     WorldConfig,
@@ -33,6 +33,8 @@ from .profiles import (
     get_profile,
     prediction_accuracy,
 )
+from .events import EventSchedule, MarketEvent
+from .predictions import Prediction, make_prediction, quote_cost
 from .engine import (
     MarketEngine,
     ProfileCoeffs,
@@ -55,6 +57,7 @@ __all__ = [
     "OrderSide",
     "ExecutionResult",
     "execute_order",
+    "liquidate_for_margin",
     "World",
     "WorldConfig",
     "MarketState",

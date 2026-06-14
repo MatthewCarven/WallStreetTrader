@@ -211,8 +211,8 @@ class World:
         return self.portfolio.equity(self.price_of)
 
     def net_worth(self) -> float:
-        """Equity today. (Once loans land in V1.5 this nets out outstanding debt.)"""
-        return self.equity()
+        """Equity minus outstanding loan debt (design.md §8.2)."""
+        return self.portfolio.net_worth(self.price_of)
 
     def derive_rng(self, salt: str) -> random.Random:
         """A deterministic RNG stream bound to (world_seed, tick, salt). Engine seam."""
