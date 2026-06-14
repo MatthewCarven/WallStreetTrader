@@ -61,6 +61,18 @@ Pick a volatility profile and a world seed, then trade. Key commands:
 
 Saves live in `saves/` (gitignored).
 
+### Live TUI (retro terminal client)
+
+```bash
+pip install textual
+python play_tui.py        # or:  python -m trader_pro.tui
+```
+
+The market **ticks live**. Keys: **Space** play/pause, **[ / ]** speed, **s** step a minute,
+**h** +1 hour, **d** +1 day, **:** command line (every CLI command works), **q** quit.
+The board shows your holdings + a crypto/stock watchlist (`watch <SYM>` to add); the right
+pane shows positions and a live news log.
+
 ## Requirements
 
 Python 3.10+. Seed generation uses only the standard library. The engine (V0.2+) will add

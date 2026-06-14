@@ -1,3 +1,7 @@
-# Seed generation (scripts/build_seed.py) uses only the standard library.
-# The simulation engine (V0.2+) will use:
-numpy>=1.24
+# Core game (engine, CLI, save/load) uses only the Python standard library — nothing to
+# install to run `python play.py`.
+#
+# Optional extras:
+textual>=0.50      # the live TUI front-end:  python play_tui.py
+matplotlib>=3.7    # validation / comparison charts in scripts/
+cairosvg>=2.7      # only to rasterise TUI screenshots (dev convenience)

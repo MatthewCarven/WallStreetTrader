@@ -160,7 +160,7 @@ class Portfolio:
         """Equity minus outstanding loan debt — the real bottom line."""
         return self.equity(price_of) - self.loan_balance()
 
-        # ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------ #
     # Valuation & margin (all need current prices)
     # ------------------------------------------------------------------ #
 

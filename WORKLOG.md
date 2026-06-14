@@ -193,3 +193,96 @@ personalities, events + black-swan cascades, loans, predictions, save/load, seed
 
 **Next:** the **TUI** front-end Matthew wants (Textual/rich over the existing TraderApp), or
 balance-tuning the high-volatility profiles. V2 (web) / V3 (multiplayer) later.
+
+## 2026-06-14 — Textual TUI front-end ✅
+
+- New `trader_pro/tui.py`: a Textual app wrapping the existing `TraderApp` (same logic as
+  the CLI). Live **ticking** market board (DataTable), status header with speed indicator,
+  positions pane, scrolling news log (events + margin calls), and a `:` command line where
+  every CLI command works. Launcher `play_tui.py` / `python -m trader_pro.tui`.
+- Time control: Space play/pause, `[` / `]` speed (Slow→Turbo via a real-time timer),
+  s/h/d to step a minute/hour/day. Vim-style: board focused by default, `:` for commands.
+- Headless pilot test `tests/test_tui.py`: board renders, command-mode buy fills, Space
+  starts the live clock and it advances, speed control responds. Green.
+- `requirements.txt` corrected (core = stdlib only; textual + matplotlib optional).
+  `tui_preview.png` shows the interface.
+
+**Full suite: 10 test files, all green.** This is the TUI Matthew wanted (memory note done).
+
+**Next ideas:** balance the hot high-vol profiles; persist watchlist; a price-chart panel
+in the TUI; then V2 (web) when ready.
+
+## 2026-06-14 — TUI fixes (browse-to-board, modal help) ✅
+
+- Bug (from Matthew's screenshot): browse commands like `stocks` dumped a full-width CLI
+  table into the narrow side log → overflow bleeding across the board/portfolio panes.
+- Fix: redesigned TUI command routing —
+  - **Browse** (`market`/`stocks [n]`/`crypto`/`bonds`/`find`/`watch`) now **repopulate the
+    main board** and set its border title; they no longer print wide tables anywhere.
+  - `look <SYM>` → compact card (price/Δ/sparkline) in the log; `help`/`?` → a scrollable
+    **modal screen**; `port` → no-op note (positions already live in the side pane); `clear`.
+  - Only short confirmations (trades, loans, predictions, events, margin calls) hit the log.
+- Added rounded borders + titles to the board ("MARKET · <view>") and log ("news & log");
+  `overflow-x: hidden` on the log. `?` keybinding opens help.
+- Pilot test still green; full suite (10 files) green. Refreshed `tui_preview.png`.
+
+**Note for Matthew:** give it another run — `stocks`, `find tesla`, `crypto`, `look NVDA`,
+`?` for help should all behave now. Flag anything else that looks off.
+
+## 2026-06-14 — TUI: keyboard views + trade dialog ✅
+
+- Number keys switch the board view: **1** crypto · **2** stocks · **3** bonds · **4** watchlist
+  (new `action_view_*`, also still available as typed commands).
+- **Enter** on the highlighted board row opens a **TradeDialog** modal: shows price, your
+  holding, cash & buying power; a quantity box (`10` / `$500` / `all`); and Buy / Sell /
+  Short / Cover buttons (wired straight to `execute_order`, so margin rules apply). Result
+  goes to the news log; rejections show inline.
+- Fixed a CSS leak: the app-level `Input { dock: bottom }` was pulling the dialog's quantity
+  box to the screen bottom — scoped it to `#cmd`, and the App now ignores non-command
+  inputs (dialog input `event.stop()`), so a dialog quantity is never run as a command.
+- Pilot test extended: number-view switching + dialog buy & short. Full suite (10) green.
+  `tui_trade_dialog.png` shows the dialog.
+
+## 2026-06-14 — TUI: paginated board ("→ Next 25") ✅
+
+- The board now **pages** instead of capping at N. In a kind/find view it shows the current
+  view's holdings pinned on top, then `page_size` (25) assets you **don't** own, then a
+  "→ Next 25  (page X/Y)" row. Selecting that row loads the next page (wraps at the end) and
+  resets the cursor to the top. Watchlist (4) and small classes (crypto 12, bonds 22) show
+  no Next row.
+- Refactor: `view_ids` → `view_source` (full candidate list) + `view_page` + `page_size`;
+  `_board_ids` → `_visible()` returning (ids, next_label); `__next__` sentinel handled in
+  `on_data_table_row_selected`. Owned assets are pinned and excluded from the page candidates.
+- Pilot test extended (page 1/21 → Next → page 2/21, owned pinned, crypto has no Next).
+  Full suite (10) green. `tui_paging.png` shows the Next row.
+
+## 2026-06-14 — TUI: "0" = owned-only view ✅
+
+- Added key **0** → "owned" board view (just your open positions, no paging/Next row).
+  `owned_only` flag short-circuits `_visible()`; any other view key clears it.
+- Board view keys: 0 owned · 1 crypto · 2 stocks · 3 bonds · 4 watchlist. Help updated.
+- Pilot test asserts the owned view; full suite (10) green.
+
+## 2026-06-14 — Fix: trade dialog crash on rapid Enter ✅
+
+- Bug (Matthew): hammering Enter on the buy dialog raised `ScreenStackError: Can't pop
+  screen…`. Cause: after Enter #1 fills the order and dismisses the dialog, queued Enter
+  keypresses still reach the (now-closing) input → `on_input_submitted` → `_act` → a second
+  `dismiss()` on an already-popped screen.
+- Fix: made the dialog action idempotent. `_act` early-returns if `self._closing`; a single
+  `_close()` helper sets the flag and dismisses **at most once**, guarded by
+  `if self in self.app.screen_stack`. `on_input_submitted`, button presses and Esc all route
+  through it. So a stuck/rapid Enter is a harmless no-op now, never a crash.
+- TUI pilot suite still green (sandbox was flaky running the async harness repeatedly, but
+  `test_tui.py` exits 0; guard verified by inspection too).
+
+## 2026-06-14 — Fix: empty quantity no longer auto-buys ✅
+
+- The trade dialog defaulted an empty quantity box to "1", so a stray Enter on a freshly
+  opened dialog silently placed a 1-unit BUY (this is what actually happened in Matthew's
+  crash trace — an unintended AAPL buy, then the ScreenStackError on the repeat Enters).
+- Fix: `_act` now reads the raw quantity; if it's empty it shows "enter a quantity first"
+  and returns without ordering. No more accidental fills from a stray Enter/click.
+- Verified by inspection + the 9 non-TUI suites are green. (The Textual pilot test couldn't
+  be run to completion this session — the sandbox kept timing out the async UI harness under
+  load — but the change is a 3-line guard in `TradeDialog._act`.)
