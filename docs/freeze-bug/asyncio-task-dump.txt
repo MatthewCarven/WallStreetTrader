@@ -1,0 +1,37 @@
+asyncio task dump captured at the moment of the freeze
+======================================================
+How: ran the real TUI under a pseudo-tty, opened the trade dialog on a row, dismissed it,
+then (from a watchdog thread) scheduled asyncio.all_tasks() + Task.get_stack() onto the loop.
+
+The key finding: App.pop_screen's `do_pop` coroutine is stuck (done=False) and EVERY child
+widget of the dismissed TradeDialog still has a live message-pump task (done=False). The
+screen left the stack logically, but `screen.remove()` never finished tearing the widgets
+down -> the loop parks idle and stops dispatching input.
+
+(55 tasks total; the relevant ones shown — full set was all "MessagePump._process_messages".)
+
+  TASK: Task-285  coro= App.pop_screen.<locals>.do_pop   done= False
+         app.py 3119 do_pop                                      <-- STUCK, never completes
+
+  TASK: message pump TradeDialog()                       done= False
+         message_pump.py 571 _process_messages
+  TASK: message pump Vertical(id='trade-box')            done= False
+  TASK: message pump Static(id='trade-info')             done= False
+  TASK: message pump Input(id='qty')                     done= False
+  TASK: message pump Horizontal(id='trade-buttons')      done= False
+  TASK: message pump Button(id='buy',   variant='success') done= False
+  TASK: message pump Button(id='sell',  variant='error')   done= False
+  TASK: message pump Button(id='short', variant='warning') done= False
+  TASK: message pump Button(id='cover', variant='primary') done= False
+  TASK: message pump Static(id='trade-msg')             done= False
+
+  (plus the base screen + its widgets: Screen, DataTable(#board), RichLog(#log),
+   Input(#cmd), Header/Footer, status/port Statics, the set_interval timers, etc. —
+   all healthy and idle, waiting on a loop that is wedged inside do_pop.)
+
+Interpretation
+--------------
+screen.remove() -> _prune() builds an AwaitRemove that awaits each pruned widget's _task
+(its message pump). Those tasks never finish here, so the AwaitRemove (and the do_pop that
+awaits it) never resolves. Removing the four Buttons from the dialog avoids the deadlock in
+isolation, which is why the Buttons are flagged as a strong contributor.

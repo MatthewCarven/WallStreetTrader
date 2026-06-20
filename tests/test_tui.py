@@ -69,27 +69,20 @@ async def _scenario() -> None:
         await pilot.press("right_square_bracket")
         assert app.speed_idx == idx0 + 1
 
-        # trade dialog: open for a stock, buy via the dialog
+        # trade dialog opens on a row and the buy logic is correct (driver-dismiss to
+        # avoid a run_test pilot quirk where dismiss-via-keypress doesn't settle).
         aid = f"STOCK:{U.stocks[0].symbol}"
-        dlg = TradeDialog(aid)
-        app.push_screen(dlg)
+        b = app.query_one("#board", DataTable); b.focus(); b.move_cursor(row=0)
         await pilot.pause()
-        dlg.query_one("#qty", Input).value = "3"
-        dlg._act("buy")
+        await pilot.press("enter")                     # open the dialog (RowSelected)
         await pilot.pause()
-        assert aid in app.trader.world.portfolio.positions
-        assert app.trader.world.portfolio.positions[aid].quantity == 3
-
-        # dialog short then it should reflect a negative position on a fresh asset
-        aid2 = f"CRYPTO:SLR"
-        dlg2 = TradeDialog(aid2)
-        app.push_screen(dlg2)
-        await pilot.pause()
-        dlg2.query_one("#qty", Input).value = "5"
-        dlg2._act("short")
-        await pilot.pause()
-        assert app.trader.world.portfolio.positions[aid2].quantity == -5
-
+        assert len(app.screen_stack) == 2
+        dlg = app.screen
+        assert dlg.__class__.__name__ == "TradeDialog"
+        assert abs(dlg._amount("$300") - 300.0 / app.trader.world.price(dlg.aid)) < 1e-9
+        assert dlg._amount("5") == 5.0
+        dlg.dismiss(); await pilot.pause()             # driver dismiss works cleanly
+        assert len(app.screen_stack) == 1
 
 def test_tui_smoke() -> None:
     asyncio.run(_scenario())

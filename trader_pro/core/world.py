@@ -58,6 +58,7 @@ class WorldConfig:
     world_seed: int
     profile: str = "Normal"
     starting_cash: float = DEFAULT_STARTING_CASH
+    fee_level: str = "off"
 
     def __post_init__(self) -> None:
         if self.profile not in PROFILES:
@@ -68,6 +69,7 @@ class WorldConfig:
             "world_seed": self.world_seed,
             "profile": self.profile,
             "starting_cash": self.starting_cash,
+            "fee_level": self.fee_level,
         }
 
     @staticmethod
@@ -76,6 +78,7 @@ class WorldConfig:
             world_seed=d["world_seed"],
             profile=d.get("profile", "Normal"),
             starting_cash=d.get("starting_cash", DEFAULT_STARTING_CASH),
+            fee_level=d.get("fee_level", "off"),
         )
 
 
@@ -132,10 +135,11 @@ class World:
         *,
         profile: str = "Normal",
         starting_cash: float = DEFAULT_STARTING_CASH,
+        fee_level: str = "off",
     ) -> "World":
         """Create a fresh world at tick 0 with seeded starting prices."""
         config = WorldConfig(world_seed=world_seed, profile=profile,
-                             starting_cash=starting_cash)
+                             starting_cash=starting_cash, fee_level=fee_level)
         market = MarketState()
         portfolio = Portfolio(cash=starting_cash)
         world = cls(universe=universe, config=config, market=market, portfolio=portfolio)

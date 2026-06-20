@@ -1,0 +1,35 @@
+faulthandler all-thread stack dump, taken while the TUI was frozen
+=================================================================
+How: launched the real TUI under a pseudo-tty with `faulthandler.dump_traceback_later(...)`
+armed, opened + dismissed the trade dialog, then let the dump fire while frozen.
+
+Reading: this is NOT a CPU spin. The asyncio loop (main thread) is parked idle in
+selectors.select, and the driver's input thread is alive and blocked reading the tty. Input
+is being read at the OS level but never dispatched into the app, because the loop is wedged
+in the never-finishing screen teardown (see asyncio-task-dump.txt). That is why the screen
+looks normal (dialog gone, board intact) yet no keystroke — including Ctrl-C — does anything.
+
+--- input thread: alive, waiting on the terminal fd ---
+Thread (input):
+  File ".../python3.10/selectors.py", line 324 in select
+  File ".../textual/drivers/linux_driver.py", line 458 in run_input_thread
+  File ".../textual/drivers/linux_driver.py", line 409 in _run_input_thread
+  File ".../python3.10/threading.py", line 953 in run
+  File ".../python3.10/threading.py", line 1016 in _bootstrap_inner
+  File ".../python3.10/threading.py", line 973 in _bootstrap
+
+--- writer thread: idle ---
+Thread (writer):
+  File ".../textual/drivers/_writer_thread.py", line 60 in run
+  File ".../python3.10/threading.py", line 1016 in _bootstrap_inner
+  File ".../python3.10/threading.py", line 973 in _bootstrap
+
+--- main thread: asyncio loop parked idle (not spinning) ---
+Thread (main):
+  File ".../python3.10/selectors.py", line 469 in select
+  File ".../python3.10/asyncio/base_events.py", line 1871 in _run_once
+  File ".../python3.10/asyncio/base_events.py", line 603 in run_forever
+  File ".../python3.10/asyncio/base_events.py", line 636 in run_until_complete
+  File ".../python3.10/asyncio/runners.py", line 44 in run
+  File ".../textual/app.py", line 2350 in run
+  File "play_tui.py" (run_tui)

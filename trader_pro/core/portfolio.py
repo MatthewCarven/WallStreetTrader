@@ -81,6 +81,7 @@ class Portfolio:
     positions: dict[str, Position] = field(default_factory=dict)
     realized_pnl: float = 0.0
     loans: list[Loan] = field(default_factory=list)
+    nw_history: list = field(default_factory=list)   # (tick, net_worth) samples for the equity chart
 
     # ------------------------------------------------------------------ #
     # Fills — the one mutation path (cash is handled by the order executor)
@@ -160,6 +161,23 @@ class Portfolio:
         """Equity minus outstanding loan debt — the real bottom line."""
         return self.equity(price_of) - self.loan_balance()
 
+    def record_net_worth(self, tick: int, price_of: PriceFn, cap: int = 240) -> None:
+        """Append (tick, net_worth) for the equity chart. Bounded: once the series passes `cap`
+        points it is halved (keep every other), so the whole game stays charted at a fixed cost
+        no matter how long you play. Prices themselves are never stored (they are a pure function
+        of the seed); only this small portfolio curve is."""
+        nw = self.net_worth(price_of)
+        h = self.nw_history
+        if h and h[-1][0] == tick:
+            h[-1] = (tick, nw)
+            return
+        h.append((tick, nw))
+        if len(h) > cap:
+            kept = h[::2]
+            if kept[-1][0] != h[-1][0]:
+                kept.append(h[-1])
+            self.nw_history = kept
+
     # ------------------------------------------------------------------ #
     # Valuation & margin (all need current prices)
     # ------------------------------------------------------------------ #
@@ -204,6 +222,7 @@ class Portfolio:
             "realized_pnl": self.realized_pnl,
             "positions": {aid: p.to_dict() for aid, p in self.positions.items()},
             "loans": [l.to_dict() for l in self.loans],
+            "nw_history": [[int(t), float(v)] for t, v in self.nw_history],
         }
 
     @staticmethod
@@ -213,4 +232,5 @@ class Portfolio:
             realized_pnl=d.get("realized_pnl", 0.0),
             positions={aid: Position.from_dict(pd) for aid, pd in d.get("positions", {}).items()},
             loans=[Loan.from_dict(ld) for ld in d.get("loans", [])],
+            nw_history=[tuple(x) for x in d.get("nw_history", [])],
         )

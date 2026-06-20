@@ -2,6 +2,10 @@
 # install to run `python play.py`.
 #
 # Optional extras:
-textual>=0.50      # the live TUI front-end:  python play_tui.py
+# NOTE: capped below 0.72 — Textual 0.72.0 introduced a regression that deadlocks the
+# trade-dialog teardown and freezes the whole TUI (Ctrl-C included). 0.71.0 is the last good
+# release; bisect + details in docs/freeze-bug/README.md. Lift the cap once it's fixed upstream
+# (or once the dialog is rebuilt to be version-proof).
+textual>=0.50,<0.72   # the live TUI front-end:  python play_tui.py
 matplotlib>=3.7    # validation / comparison charts in scripts/
 cairosvg>=2.7      # only to rasterise TUI screenshots (dev convenience)

@@ -10,6 +10,7 @@ line to the news log; `help` and `look` open a panel. Requires `textual`.
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, Static
@@ -50,6 +51,7 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
   [  ]     slower / faster   (Slow → Turbo)
   s        step one minute      h  +1 hour      d  +1 day
   :        open the command line
+  Ctrl+N   start a new world (profile/seed/cash/fees)
   q        quit
 
 [b]Command line[/]  (press : first)
@@ -69,6 +71,7 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
     loan <amount>             repay [amount|all]
   [b]World[/]:
     save [name]       load [name]       clear   (clear the log)
+    fees [off…diabolic]   brokerage difficulty — taxes every trade
 
 [dim]press Esc or q to close[/]"""
 
@@ -78,7 +81,8 @@ class HelpScreen(ModalScreen):
     HelpScreen { align: center middle; }
     #help-box { width: 78; height: 90%; border: round $primary; background: $panel; padding: 1 2; }
     """
-    BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close")]
+    BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close"),
+                Binding("ctrl+c", "app.force_quit", "Quit", priority=True)]
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="help-box"):
@@ -99,7 +103,8 @@ class TradeDialog(ModalScreen):
     #qty { margin: 1 0; }
     #trade-msg { height: auto; }
     """
-    BINDINGS = [("escape", "cancel", "Cancel")]
+    BINDINGS = [("escape", "cancel", "Cancel"),
+                Binding("ctrl+c", "app.force_quit", "Quit", priority=True)]
 
     def __init__(self, asset_id: str):
         super().__init__()
@@ -156,36 +161,102 @@ class TradeDialog(ModalScreen):
             self._msg("enter a valid quantity", "yellow"); return
         side = OrderSide.BUY if verb in ("buy", "cover") else OrderSide.SELL
         res = execute_order(w, Order(self.aid, side, qty))
-        sym = self.aid.split(":", 1)[1]
-        if res.filled:
-            self.app._log(Text(f"{verb} {qty:g} {sym} @ {money(res.price)} "
-                               f"(P&L {res.realized_pnl:+,.2f})", style="green"))
-            self.app._refresh()
-            self._close()
-        else:
+        if not res.filled:                 # rejected: keep the dialog open, show why
             self._msg(res.message, "red")
-            self.app._refresh()
+            return
+        # Success: hand the fill back and close. The app logs + redraws the board from its
+        # push_screen callback (TraderTUI._on_trade_closed) AFTER we have popped -- so the modal
+        # never reaches into the main screen's widgets (#log/#board/...) while it is still open.
+        # Doing that from here throws NoMatches on Textual 0.71.x and is fragile on newer Textual.
+        self._closing = True
+        self.dismiss((verb, qty, self.aid.split(":", 1)[1], res))
 
     def _msg(self, text: str, style: str) -> None:
         self.query_one("#trade-msg", Static).update(Text(text, style=style))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
         self._act(event.button.id)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
         self._act("buy")
 
-    def _close(self) -> None:
-        """Dismiss at most once, even if extra key/clicks are queued."""
+    def action_cancel(self) -> None:
         if self._closing:
             return
         self._closing = True
-        if self in self.app.screen_stack:
-            self.dismiss()
+        self.dismiss(None)
+
+
+class NewWorldScreen(ModalScreen):
+    """Ctrl+N — start a fresh world. Fields are pre-filled (seed re-rolled; profile/cash/fees
+    default to the current game). Enter starts, Esc cancels. Keyboard-driven, no Buttons."""
+
+    CSS = """
+    NewWorldScreen { align: center middle; }
+    #nw-box { width: 64; height: auto; border: round $primary; background: $panel; padding: 1 2; }
+    #nw-box Input { margin: 0 0 1 0; }
+    .nw-lbl { color: $text-muted; }
+    """
+    BINDINGS = [("escape", "cancel", "Cancel"),
+                Binding("ctrl+c", "app.force_quit", "Quit", priority=True)]
+
+    def __init__(self):
+        super().__init__()
+        self._closing = False
+
+    def compose(self) -> ComposeResult:
+        import random
+        cfg = self.app.trader.world.config
+        with Vertical(id="nw-box"):
+            yield Static("[b cyan]New world[/]   [dim](unsaved progress is lost — save first to keep it)[/]")
+            yield Static("profile", classes="nw-lbl")
+            yield Input(value=cfg.profile, id="nw-profile")
+            yield Static("world seed", classes="nw-lbl")
+            yield Input(value=str(random.randint(1, 99_999_999)), id="nw-seed")
+            yield Static("starting cash", classes="nw-lbl")
+            yield Input(value=f"{cfg.starting_cash:g}", id="nw-cash")
+            yield Static("fees  (off / low / medium / high / greedy / diabolic)", classes="nw-lbl")
+            yield Input(value=cfg.fee_level, id="nw-fees")
+            yield Static("[b]Enter[/] start   ·   [b]Tab[/] next field   ·   [b]Esc[/] cancel", classes="nw-lbl")
+
+    def on_mount(self) -> None:
+        self.query_one("#nw-profile", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._start()
+
+    def _start(self) -> None:
+        if self._closing:
+            return
+        from .core import get_profile, PROFILE_NAMES
+        from .core.orders import FEE_LEVELS
+        cfg = self.app.trader.world.config
+        raw = self.query_one("#nw-profile", Input).value.strip()
+        try:
+            get_profile(raw); profile = raw
+        except Exception:
+            profile = next((n for n in PROFILE_NAMES if n.lower() == raw.lower()), cfg.profile)
+        try:
+            seed = int(self.query_one("#nw-seed", Input).value.strip())
+        except ValueError:
+            seed = cfg.world_seed
+        try:
+            cash = max(1.0, float(self.query_one("#nw-cash", Input).value.strip().lstrip("$").replace(",", "")))
+        except ValueError:
+            cash = cfg.starting_cash
+        fee_raw = self.query_one("#nw-fees", Input).value.strip().lower()
+        fee_level = fee_raw if fee_raw in FEE_LEVELS else cfg.fee_level
+        self._closing = True
+        self.dismiss((profile, seed, cash, fee_level))
 
     def action_cancel(self) -> None:
-        self._close()
+        if self._closing:
+            return
+        self._closing = True
+        self.dismiss(None)
 
 
 class TraderTUI(App):
@@ -195,6 +266,7 @@ class TraderTUI(App):
     #body { height: 1fr; }
     #board { width: 2fr; border: round $primary; }
     #side { width: 1fr; }
+    #equity { height: 6; border: round $primary; padding: 0 1; }
     #port { height: 1fr; padding: 0 1; background: $panel; }
     #log { height: 1fr; border: round $primary; overflow-x: hidden; }
     #cmd { dock: bottom; }
@@ -216,6 +288,9 @@ class TraderTUI(App):
         ("0", "view_owned", "Owned"),
         ("question_mark", "help", "Help"),
         ("q", "quit", "Quit"),
+        Binding("ctrl+c", "force_quit", "Quit", priority=True),
+        Binding("ctrl+q", "force_quit", "Quit", priority=True),
+        Binding("ctrl+n", "new_world", "New world"),
     ]
 
     def __init__(self, trader: TraderApp):
@@ -228,6 +303,7 @@ class TraderTUI(App):
         self.view_page = 0
         self.page_size = 25
         self.owned_only = False
+        self.cursor_aid: str | None = None    # asset highlighted on the board (for the name line)
         notable = ["AAPL", "MSFT", "NVDA", "AMZN", "JPM", "XOM", "GOOGL", "TSLA"]
         w = trader.world
         self.watch: list[str] = [f"CRYPTO:{c.symbol}" for c in w.universe.crypto]
@@ -243,6 +319,7 @@ class TraderTUI(App):
         with Horizontal(id="body"):
             yield DataTable(id="board", zebra_stripes=True, cursor_type="row")
             with Vertical(id="side"):
+                yield Static(id="equity")
                 yield Static(id="port")
                 yield RichLog(id="log", wrap=True, markup=True)
         yield Input(placeholder="press : for a command  (buy BTR $500 · short SLR 50 · stocks · find tesla · predict NVDA 1d · help)", id="cmd")
@@ -253,6 +330,7 @@ class TraderTUI(App):
         table.add_columns("Symbol", "Price", "1D %", "Pos", "Value")
         table.border_title = "MARKET · watchlist"
         self.query_one("#log", RichLog).border_title = "news & log"
+        self.query_one("#equity", Static).border_title = "net worth"
         self.set_focus(table)
         self.set_interval(0.3, self._on_timer)
         self._log(Text("Welcome to Trader PRO.  Space=play  [ ]=speed  :=command  ?=help", style="bold cyan"))
@@ -307,19 +385,21 @@ class TraderTUI(App):
         label = f"Next {self.page_size}   (page {page + 1}/{total})" if total > 1 else None
         return held + page_ids, label
 
-    def _refresh(self) -> None:
+    def _render_status(self) -> None:
+        """Render the status block at the top of the screen. Its 4th row (otherwise blank) shows
+        the full name of the asset currently highlighted on the board, so browsing the list tells
+        you what each symbol is. Cheap enough to redraw on every cursor move."""
         w = self.trader.world
         pf = w.portfolio
         po = w.price_of
         t = w.market.tick_index
-        eng = self.trader.engine
-
         nw = pf.net_worth(po)
         ret = (nw / w.config.starting_cash - 1) * 100
         speed = "PAUSED" if not self.playing else SPEEDS[self.speed_idx][0]
         status = Text()
         status.append("TRADER PRO ", style="bold cyan")
-        status.append(f"seed {w.config.world_seed} · {w.config.profile} · {fmt_clock(t)}   ")
+        status.append(f"seed {w.config.world_seed} · {w.config.profile} · "
+                      f"fees {getattr(w.config, 'fee_level', 'off')} · {fmt_clock(t)}   ")
         status.append(f"[{speed}]\n", style="bold yellow" if self.playing else "dim")
         status.append(f"cash {money(pf.cash)}   equity {money(pf.equity(po))}   net worth {money(nw)} ")
         status.append(f"({ret:+.1f}%)\n", style="green" if ret >= 0 else "red")
@@ -329,7 +409,23 @@ class TraderTUI(App):
             status.append(f"   loans {money(pf.loan_balance())}", style="yellow")
         if pf.is_margin_call(po):
             status.append("   ⚠ MARGIN CALL", style="bold red")
+        status.append("\n")
+        aid = self.cursor_aid
+        if aid and w.has_asset(aid):
+            status.append("▶ ", style="bold cyan")
+            status.append(f"{aid.split(':', 1)[1]}  ", style="bold")
+            status.append(w.name_of(aid), style="white")
+            status.append(f"   · {w.kind_of(aid).name.title()}", style="dim")
         self.query_one("#status", Static).update(status)
+
+    def _refresh(self) -> None:
+        w = self.trader.world
+        pf = w.portfolio
+        po = w.price_of
+        t = w.market.tick_index
+        eng = self.trader.engine
+
+        self._render_status()
 
         table = self.query_one("#board", DataTable)
         table.border_title = f"MARKET · {self.view_label}"
@@ -370,6 +466,29 @@ class TraderTUI(App):
         port.append(f"\nrealized P&L {money(pf.realized_pnl)}", style="dim")
         self.query_one("#port", Static).update(port)
 
+        hist = pf.nw_history
+        eq = Text()
+        if len(hist) >= 2:
+            vals = [v for _, v in hist]
+            width = 28
+            if len(vals) > width:
+                step = len(vals) / width
+                disp = [vals[min(len(vals) - 1, int(i * step))] for i in range(width)]
+                disp[-1] = vals[-1]
+            else:
+                disp = vals
+            cur, lo, hi = vals[-1], min(vals), max(vals)
+            ret = (cur / w.config.starting_cash - 1) * 100
+            tone = "green" if ret >= 0 else "red"
+            eq.append(f"{money(cur)}  ", style="bold " + tone)
+            eq.append(f"{ret:+.1f}%\n", style=tone)
+            eq.append(sparkline(disp) + "\n", style=tone)
+            eq.append(f"hi ${hi:,.0f}  lo ${lo:,.0f}  · {len(hist)}p", style="dim")
+        else:
+            eq.append("NET WORTH\n", style="bold")
+            eq.append("play the clock ▶ to chart it", style="dim")
+        self.query_one("#equity", Static).update(eq)
+
     def _log(self, renderable) -> None:
         self.query_one("#log", RichLog).write(renderable)
 
@@ -378,6 +497,9 @@ class TraderTUI(App):
             self.query_one("#log", RichLog).write(Text.from_ansi(text))
 
     # ---- actions ---- #
+
+    def action_force_quit(self) -> None:
+        self.exit()
 
     def action_toggle_play(self) -> None:
         self.playing = not self.playing
@@ -408,6 +530,33 @@ class TraderTUI(App):
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
 
+    def action_new_world(self) -> None:
+        self.push_screen(NewWorldScreen(), self._on_new_world)
+
+    def _on_new_world(self, result) -> None:
+        if not result:
+            return
+        profile, seed, cash, fee_level = result
+        world = World.new(self.trader.universe, world_seed=seed, profile=profile,
+                          starting_cash=cash, fee_level=fee_level)
+        self.trader.start_world(world)
+        self.view_source = None
+        self.view_label = "watchlist"
+        self.view_page = 0
+        self.owned_only = False
+        self.cursor_aid = None
+        self.playing = False
+        self.query_one("#log", RichLog).clear()
+        self._log(Text(f"★ new world  ·  seed {seed} · {profile} · "
+                       f"{money(cash)} · fees {fee_level}", style="bold cyan"))
+        self._refresh()
+        board = self.query_one("#board", DataTable)
+        self.set_focus(board)
+        try:
+            board.move_cursor(row=0)
+        except Exception:
+            pass
+
     def action_view_crypto(self) -> None:
         self._set_view(self._kind_ids(AssetKind.CRYPTO), "crypto")
 
@@ -436,7 +585,24 @@ class TraderTUI(App):
                 pass
             return
         if aid and self.trader.world.has_asset(aid):
-            self.push_screen(TradeDialog(aid))
+            self.push_screen(TradeDialog(aid), self._on_trade_closed)
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        key = getattr(event.row_key, "value", None)
+        w = self.trader.world
+        self.cursor_aid = key if (key and key != "__next__" and w.has_asset(key)) else None
+        self._render_status()
+
+    def _on_trade_closed(self, result) -> None:
+        """Runs on the app after a TradeDialog pops. `result` is None on cancel, else
+        (verb, qty, sym, ExecutionResult). Log + redraw here, on the main screen once the modal
+        is gone, so the dialog never touches our widgets while it is still open."""
+        if result is not None:
+            verb, qty, sym, res = result
+            fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
+            self._log(Text(f"{verb} {qty:g} {sym} @ {money(res.price)}{fee_txt} "
+                           f"(P&L {res.realized_pnl:+,.2f})", style="green"))
+        self._refresh()
 
     # ---- view switching ---- #
 
@@ -539,7 +705,7 @@ class TraderTUI(App):
 def run_tui() -> None:
     universe = load_seed_universe()
     trader = TraderApp(World.new(universe, world_seed=20260614, profile="Normal",
-                                 starting_cash=2500.0), universe=universe)
+                                 starting_cash=5000.0, fee_level="off"), universe=universe)
     TraderTUI(trader).run()
 
 

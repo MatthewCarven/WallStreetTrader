@@ -82,6 +82,16 @@ class TraderApp:
         self.world = world or World.new(self.universe, world_seed=20260614, profile="Normal")
         self.engine = MarketEngine(self.world)
         self.running = True
+        if not self.world.portfolio.nw_history:    # seed the equity chart at the current tick
+            self.world.portfolio.record_net_worth(self.world.market.tick_index, self.world.price_of)
+
+    def start_world(self, world: "World") -> None:
+        """Swap in a fresh world (the TUI's Ctrl+N 'new world'): rebuild the engine and seed the
+        equity chart, exactly like construction."""
+        self.world = world
+        self.engine = MarketEngine(world)
+        if not world.portfolio.nw_history:
+            world.portfolio.record_net_worth(world.market.tick_index, world.price_of)
 
     # ---- symbol resolution ---- #
 
@@ -163,6 +173,7 @@ class TraderApp:
             "port": self._port, "portfolio": self._port, "p": self._port,
             "news": self._news,
             "loan": self._loan,
+            "fees": self._fees, "fee": self._fees,
             "repay": self._repay,
             "predict": self._predict, "pred": self._predict,
             "next": self._next, "n": self._next,
@@ -197,6 +208,7 @@ class TraderApp:
             "  predict <SYM> [1d|6h]     buy a forecast (accuracy depends on the world)\n"
             "  loan <amount>             borrow cash (no game-over); rate scales w/ size\n"
             "  repay [amount|all]        pay down loans\n"
+            "  fees [off…diabolic]       brokerage difficulty — commission on every trade\n"
             "  step | hour | day         advance 1 min / 1 hour / 1 day\n"
             "  next <ticks>              advance N minutes\n"
             "  run <ticks> [delay]       live auto-advance (delay sec/tick, default 0.05)\n"
@@ -289,8 +301,9 @@ class TraderApp:
             return "invalid quantity"
         res = execute_order(self.world, Order(aid, OrderSide.BUY, qty))
         if res.filled:
+            fee_txt = f"  fee {money(res.fee)}" if res.fee else ""
             return col(f"bought {qty:g} {args[0].upper()} @ {money(res.price)} "
-                       f"(−{money(-res.cash_delta)})  cash {money(self.world.portfolio.cash)}", C.GREEN)
+                       f"(−{money(-res.cash_delta)}{fee_txt})  cash {money(self.world.portfolio.cash)}", C.GREEN)
         return col(f"order rejected: {res.message}", C.RED)
 
     def _sell(self, args) -> str:
@@ -349,6 +362,7 @@ class TraderApp:
         self.engine.advance(ticks)
         t1 = self.world.market.tick_index
         self.world.portfolio.accrue_interest(t1 - t0)
+        self.world.portfolio.record_net_worth(t1, self.world.price_of)
         events = self.engine.events.fired_between(t0, t1)
         closures = liquidate_for_margin(self.world)
         return events, closures
@@ -412,6 +426,19 @@ class TraderApp:
         if ticks % HOUR == 0:
             return f"{ticks // HOUR}h"
         return f"{ticks}m"
+
+    def _fees(self, args) -> str:
+        from .core.orders import FEE_RATES, FEE_LEVELS
+        cfg = self.world.config
+        if not args:
+            cur = getattr(cfg, "fee_level", "off")
+            return (f"brokerage fees: {col(cur, C.BOLD)} ({FEE_RATES.get(cur, 0) * 100:.2f}% per trade)\n"
+                    f"  set with 'fees <level>'  —  {' / '.join(FEE_LEVELS)}")
+        level = args[0].lower()
+        if level not in FEE_RATES:
+            return col(f"unknown fee level {level!r} — choose from {', '.join(FEE_LEVELS)}", C.YELLOW)
+        cfg.fee_level = level
+        return col(f"brokerage fees → {level} ({FEE_RATES[level] * 100:.2f}% per trade)", C.CYAN)
 
     def _loan(self, args) -> str:
         if not args:
@@ -543,6 +570,8 @@ class TraderApp:
             return col(f"no save named {path.name}", C.YELLOW)
         self.world = load_world(path, self.universe)
         self.engine = MarketEngine(self.world)
+        if not self.world.portfolio.nw_history:
+            self.world.portfolio.record_net_worth(self.world.market.tick_index, self.world.price_of)
         return col(f"loaded ← {path.name}", C.CYAN) + "\n" + self.header()
 
     def _quit(self, args) -> str:
@@ -567,9 +596,12 @@ def _prompt_new_world(universe) -> World:
         profile = "Normal"
     seed_raw = input("  world seed [20260614]: ").strip()
     seed = int(seed_raw) if seed_raw.lstrip("-").isdigit() else 20260614
-    cash_raw = input("  starting cash [2500]: ").strip()
-    cash = float(cash_raw) if cash_raw.replace(".", "").isdigit() else 2500.0
-    return World.new(universe, world_seed=seed, profile=profile, starting_cash=cash)
+    cash_raw = input("  starting cash [5000]: ").strip()
+    cash = float(cash_raw) if cash_raw.replace(".", "").isdigit() else 5000.0
+    from .core.orders import FEE_LEVELS
+    fees_raw = input(f"  brokerage fees [off]  ({' / '.join(FEE_LEVELS)}): ").strip().lower()
+    fee_level = fees_raw if fees_raw in FEE_LEVELS else "off"
+    return World.new(universe, world_seed=seed, profile=profile, starting_cash=cash, fee_level=fee_level)
 
 
 def repl() -> None:
