@@ -67,7 +67,9 @@ written atomically (a crash mid-save can't corrupt a slot).
 > introduced a regression that deadlocks the trade-dialog teardown and freezes the whole
 > app (Ctrl-C included); 0.71.0 is the last good release. Full bisect and evidence in
 > [`docs/freeze-bug/README.md`](docs/freeze-bug/README.md). If you already have a newer
-> Textual, downgrade with `pip install "textual<0.72"`.
+> Textual, downgrade with `pip install "textual<0.72"`. `play_tui.py` now **checks this on
+> startup** and refuses to launch (with the fix command) on >= 0.72, rather than letting you
+> hit the freeze mid-game.
 
 ## Commands
 

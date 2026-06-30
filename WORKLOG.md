@@ -556,3 +556,22 @@ Loading reuses `TraderApp.start_world` (preserves the loaded equity history) plu
 app handlers (same guard the timer uses). Tests: `test_persistence.py` (roundtrip+meta, atomicity,
 ordering, pre-meta/corrupt fallback, delete, autosave helpers) and `test_tui_persistence.py`
 (Ctrl+S modal + sanitise, browser order, load-older, double-`x` delete, autosave, resume).
+
+## 2026-06-30 — Guard against the Textual >=0.72 trade-dialog freeze at startup
+
+Matthew hit the documented freeze in real play: buy ~$10k of BTR via the Enter trade dialog, the
+dialog closes, and the TUI locks up — but the amber ticker keeps scrolling. That last detail is
+the tell: the `set_interval` ticker timer keeps firing while Textual's screen-teardown wedges input
+dispatch (see docs/freeze-bug/README.md). Confirmed by repro: the play→dialog→buy→close flow is
+clean on the pinned 0.71.0 but hangs past a 45s timeout on 0.72.0. So his machine has Textual
+>= 0.72 despite the `<0.72` cap in requirements.
+
+Rather than rely on people reading the cap, `run_tui()` now calls a new `textual_version_ok()` and,
+on >= 0.72 (incl. 1.x/2.x and rc tags), prints a clear message — what breaks, and
+`pip install "textual<0.72"` — and **refuses to launch** instead of freezing on the first trade.
+Tests in `tests/test_version_guard.py` (parser across 0.50→2.x, and that run_tui refuses + explains).
+66 tests pass.
+
+Proper long-term fix still open: the freeze is upstream in Textual's teardown of *this* ModalScreen;
+the dependable cure is to move the trade UI off `ModalScreen` (an inline, non-modal panel toggled
+with `display`), which would lift the version cap entirely. Flagged for a follow-up.

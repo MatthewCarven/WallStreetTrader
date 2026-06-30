@@ -1188,7 +1188,41 @@ class TraderTUI(App):
         self._refresh()
 
 
+def textual_version_ok() -> tuple[bool, str]:
+    """(supported, version). The TradeDialog modal deadlocks Textual's screen teardown on
+    >= 0.72 — you trade, the dialog closes, and the whole TUI locks up (Ctrl-C included) while
+    the background ticker keeps scrolling. See docs/freeze-bug/README.md. 0.71.x is the last
+    good release, so we require < 0.72."""
+    import textual
+    v = getattr(textual, "__version__", "0")
+    nums = []
+    for part in v.split(".")[:2]:
+        digits = ""
+        for ch in part:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        nums.append(int(digits) if digits else 0)
+    while len(nums) < 2:
+        nums.append(0)
+    return tuple(nums[:2]) < (0, 72), v
+
+
 def run_tui() -> None:
+    ok, ver = textual_version_ok()
+    if not ok:
+        print(
+            "\n  ⚠  Trader PRO needs Textual < 0.72 — you have "
+            + ver + ".\n"
+            "     Textual 0.72+ has a regression that FREEZES the trade dialog on close:\n"
+            "     you buy something, the dialog disappears, then the whole TUI locks up\n"
+            "     (the ticker keeps scrolling, but no keys work — not even Ctrl-C).\n\n"
+            "     Fix it with:\n"
+            "         pip install \"textual<0.72\"\n\n"
+            "     (background: docs/freeze-bug/README.md)\n"
+        )
+        return
     universe = load_seed_universe()
     world = None
     resumed = False
