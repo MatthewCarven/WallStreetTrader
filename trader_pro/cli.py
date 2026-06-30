@@ -23,9 +23,9 @@ from .core import (
     PROFILE_NAMES, get_profile,
 )
 from .core.engine import DAY, HOUR
+from .persistence import SAVES_DIR, save_game, load_game, slot_path
 
 ROOT = Path(__file__).resolve().parents[1]
-SAVES_DIR = ROOT / "saves"
 SPARK = "▁▂▃▄▅▆▇█"
 
 
@@ -558,21 +558,24 @@ class TraderApp:
         return col(f"order rejected: {res.message}", C.RED)
 
     def _save(self, args) -> str:
-        name = (args[0] if args else "save") + ".world"
-        path = SAVES_DIR / name
-        save_world(self.world, path)
-        return col(f"saved → {path.name}", C.CYAN)
+        name = args[0] if args else "save"
+        meta = save_game(self.world, slot_path(name, SAVES_DIR), label=name)
+        return col(f"saved → {name}.world   net worth {money(meta['net_worth'])} "
+                   f"({meta['return_pct']:+.1f}%)", C.CYAN)
 
     def _load(self, args) -> str:
-        name = (args[0] if args else "save") + ".world"
-        path = SAVES_DIR / name
+        name = args[0] if args else "save"
+        path = slot_path(name, SAVES_DIR)
         if not path.exists():
-            return col(f"no save named {path.name}", C.YELLOW)
-        self.world = load_world(path, self.universe)
+            return col(f"no save named {name}.world", C.YELLOW)
+        try:
+            self.world = load_game(path, self.universe)
+        except Exception as exc:
+            return col(f"could not load {name}.world: {exc}", C.RED)
         self.engine = MarketEngine(self.world)
         if not self.world.portfolio.nw_history:
             self.world.portfolio.record_net_worth(self.world.market.tick_index, self.world.price_of)
-        return col(f"loaded ← {path.name}", C.CYAN) + "\n" + self.header()
+        return col(f"loaded ← {name}.world", C.CYAN) + "\n" + self.header()
 
     def _quit(self, args) -> str:
         self.running = False

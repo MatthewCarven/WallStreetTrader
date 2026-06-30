@@ -519,3 +519,40 @@ again on this mounted folder, and pytest's rewritten-assert cache went stale (mo
 coarse), so edits silently ran old bytecode. Fix that bit me for a while: write to the mounted
 folder via the shell (heredoc), and run pytest with `PYTHONDONTWRITEBYTECODE=1 -p no:cacheprovider`
 after `rm -rf` of `__pycache__`. Matches the standing "shell writes are reliable" note.
+
+## 2026-06-30 — V1.7: persistence — autosave & resume, a save/load UI, slot browser
+
+Save/load already existed at the core (`save_world`/`load_world`, schema-versioned JSON). This
+milestone makes it first-class. 63 tests pass (8 new). Matthew picked autosave+resume, the in-TUI
+UI, and named slots/browser.
+
+**New `trader_pro/persistence.py`.** Wraps `World.to_dict()` and adds:
+- `save_game(world, path, label=)` — embeds a small `"meta"` envelope (net worth, return %, clock,
+  profile, fee level, timestamp, #positions) so the browser can summarise a slot without rebuilding
+  the engine. Writes are **atomic** (temp file + `os.replace`), so a crash mid-write — including the
+  frequent autosave — can never corrupt an existing slot. `from_dict` ignores the extra key, so old
+  and new saves stay cross-compatible.
+- `read_info(path)` → `SaveInfo`; derives net worth for pre-meta saves from `nw_history` or, failing
+  that, straight from the blob (cash + Σ qty·price − loans). Flags corrupt files instead of throwing.
+- `list_saves` (newest first), `delete_save`, and `slot_path` / `autosave_path` / `has_autosave`.
+- `cli.py`'s `_save`/`_load` now route through it (the CLI `save`/`load` commands get meta too).
+
+**Autosave + resume** (`tui.py`). Autosaves to the `autosave` slot on quit (`q`, Ctrl+Q, Ctrl+C —
+best-effort, never blocks exit) and periodically while playing (wall-clock throttled to every 30s,
+so speed/turbo doesn't hammer the disk). `run_tui()` resumes the autosave on launch if present and
+logs a banner with the restored clock + net worth; Ctrl+N still starts fresh. The clock-timer
+already early-returns while a modal is up, so no autosave fires behind a dialog.
+
+**Save/load UI** (`tui.py`). **Ctrl+S** → `SaveScreen` (name input, sanitised to `[A-Za-z0-9_-]`).
+**Ctrl+L** → `LoadScreen`, a slot browser (DataTable: slot · net worth · return · clock · profile ·
+age), Enter to load, `x` to delete (press twice to confirm), Esc to cancel; the `autosave` slot is
+listed and tagged `(auto)`. The `save` / `load [name]` / `saves` commands share the same paths.
+Loading reuses `TraderApp.start_world` (preserves the loaded equity history) plus a new
+`_reset_view_after_swap()` shared with Ctrl+N.
+
+**Bug found & fixed:** a modal's DataTable `RowHighlighted`/`RowSelected` messages bubble up to the
+*app's* handlers, which then query base-screen widgets (`#status`) that aren't in the modal's scope
+→ `NoMatches` crash. Fixed by `event.stop()` in the modal and a `len(screen_stack) > 1` guard on the
+app handlers (same guard the timer uses). Tests: `test_persistence.py` (roundtrip+meta, atomicity,
+ordering, pre-meta/corrupt fallback, delete, autosave helpers) and `test_tui_persistence.py`
+(Ctrl+S modal + sanitise, browser order, load-older, double-`x` delete, autosave, resume).

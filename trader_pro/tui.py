@@ -12,6 +12,9 @@ pane, a top-movers view + a sort-by-%-change toggle, and a green-phosphor colour
 
 from __future__ import annotations
 
+import re
+import time
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -22,6 +25,10 @@ from rich.text import Text
 from .cli import TraderApp
 from .core import AssetKind, Order, OrderSide, World, execute_order, load_seed_universe
 from .core.engine import DAY, HOUR, WEEK
+from .persistence import (
+    SAVES_DIR, save_game, load_game, list_saves, delete_save, slot_path,
+    autosave_path, has_autosave, AUTOSAVE_SLOT,
+)
 
 SPEEDS = [("Slow", 1), ("Normal", 12), ("Fast", 90), ("Turbo", 600)]
 SPARK = "▁▂▃▄▅▆▇█"
@@ -29,6 +36,7 @@ BLOCKS8 = " ▁▂▃▄▅▆▇"          # 0..7 sub-cell fill for the area ch
 FULL = "█"
 CHART_RANGES = [("1H", HOUR), ("1D", DAY), ("3D", 3 * DAY), ("1W", WEEK)]
 TICKER_COLOR = "#ffb000"       # amber phosphor
+AUTOSAVE_SECS = 30             # wall-clock throttle for periodic autosave while playing
 
 # retro green-phosphor palette
 GREEN = "#2fae4e"
@@ -52,6 +60,20 @@ def sparkline(vals: list[float]) -> str:
     if hi - lo < 1e-12:
         return SPARK[0] * len(vals)
     return "".join(SPARK[int((v - lo) / (hi - lo) * (len(SPARK) - 1))] for v in vals)
+
+
+def _age(epoch: float) -> str:
+    """A short human "x ago" for a save timestamp (epoch seconds)."""
+    if not epoch:
+        return "—"
+    s = max(0.0, time.time() - epoch)
+    if s < 90:
+        return f"{int(s)}s ago"
+    if s < 5400:
+        return f"{int(s / 60)}m ago"
+    if s < 129600:
+        return f"{int(s / 3600)}h ago"
+    return f"{int(s / 86400)}d ago"
 
 
 def area_chart(vals: list[float], width: int, height: int, color: str) -> Text:
@@ -115,7 +137,8 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
   s        step one minute      h  +1 hour      d  +1 day
   :        open the command line
   Ctrl+N   start a new world (profile/seed/cash/fees)
-  q        quit
+  Ctrl+S   save · Ctrl+L load (browse slots: net worth, return, age)
+  q        quit  (autosaves first)
 
 [b]Command line[/]  (press : first)
   [b]Browse[/] (fills the board):
@@ -134,8 +157,10 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
     predict <SYM> [1d|6h]     buy a forecast
     loan <amount>             repay [amount|all]
   [b]World[/]:
-    save [name]       load [name]       clear   (clear the log)
+    save [name]       load [name|—]     saves   browse / load / delete slots
+    clear   (clear the log)
     fees [off…diabolic]   brokerage difficulty — taxes every trade
+    [dim]autosaves while you play and on quit; launch resumes your last game[/]
 
 [dim]press Esc or q to close[/]"""
 
@@ -323,6 +348,143 @@ class NewWorldScreen(ModalScreen):
         self.dismiss(None)
 
 
+class SaveScreen(ModalScreen):
+    """Ctrl+S — name a slot and save. Keyboard-driven (no Buttons)."""
+
+    CSS = """
+    SaveScreen { align: center middle; }
+    #save-box { width: 60; height: auto; border: round $primary; background: $panel; padding: 1 2; }
+    #save-box Input { margin: 1 0; }
+    .sv-lbl { color: $text-muted; }
+    """
+    BINDINGS = [("escape", "cancel", "Cancel"),
+                Binding("ctrl+c", "app.force_quit", "Quit", priority=True)]
+
+    def __init__(self, default: str):
+        super().__init__()
+        self.default = default or "save"
+        self._closing = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="save-box"):
+            yield Static("[b cyan]Save game[/]")
+            yield Static("slot name  (letters / digits / - _)", classes="sv-lbl")
+            yield Input(value=self.default, id="save-name")
+            yield Static("[b]Enter[/] save   ·   [b]Esc[/] cancel", classes="sv-lbl")
+
+    def on_mount(self) -> None:
+        self.query_one("#save-name", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        if self._closing:
+            return
+        raw = self.query_one("#save-name", Input).value
+        name = re.sub(r"[^A-Za-z0-9_-]", "", raw).strip("-_") or self.default
+        self._closing = True
+        self.dismiss(name)
+
+    def action_cancel(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        self.dismiss(None)
+
+
+class LoadScreen(ModalScreen):
+    """Ctrl+L — a slot browser: net worth, return, clock, profile, age. Enter loads the
+    highlighted slot; `x` deletes it (press twice to confirm); Esc cancels."""
+
+    CSS = """
+    LoadScreen { align: center middle; }
+    #load-box { width: 94; height: auto; max-height: 90%; border: round $primary; background: $panel; padding: 1 2; }
+    #saves-tbl { height: auto; max-height: 20; }
+    #load-msg { height: 1; }
+    """
+    BINDINGS = [("escape", "cancel", "Cancel"),
+                ("x", "delete", "Delete"),
+                Binding("ctrl+c", "app.force_quit", "Quit", priority=True)]
+
+    def __init__(self, infos, saves_dir):
+        super().__init__()
+        self.infos = list(infos)
+        self.saves_dir = saves_dir
+        self._closing = False
+        self._cur = None
+        self._pending_delete = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="load-box"):
+            yield Static("[b cyan]Load game[/]   [dim]↑↓ choose · Enter load · x delete · Esc cancel[/]")
+            yield DataTable(id="saves-tbl", cursor_type="row", zebra_stripes=True)
+            yield Static(id="load-msg")
+
+    def on_mount(self) -> None:
+        t = self.query_one("#saves-tbl", DataTable)
+        t.add_columns("Slot", "Net worth", "Return", "Clock", "Profile", "Saved")
+        self._fill()
+        t.focus()
+
+    def _fill(self) -> None:
+        t = self.query_one("#saves-tbl", DataTable)
+        t.clear()
+        if not self.infos:
+            t.add_row(Text("(no saves yet)", style="dim"), "", "", "", "", "", key="__none__")
+            return
+        for i in self.infos:
+            nm = i.name + ("  (auto)" if i.is_autosave else "")
+            if i.corrupt:
+                t.add_row(Text(nm, style="red"), Text("corrupt", style="red"),
+                          "", "", "", _age(i.saved_epoch), key=i.name)
+                continue
+            nw = money(i.net_worth) if i.net_worth is not None else "—"
+            ret = f"{i.return_pct:+.1f}%" if i.return_pct is not None else "—"
+            tone = "green" if (i.return_pct or 0) >= 0 else "red"
+            t.add_row(Text(nm, style="bold"),
+                      Text(nw, justify="right"),
+                      Text(ret, style=tone, justify="right"),
+                      fmt_clock(i.tick),
+                      i.profile,
+                      _age(i.saved_epoch),
+                      key=i.name)
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        event.stop()
+        self._cur = getattr(event.row_key, "value", None)
+        if self._pending_delete and self._pending_delete != self._cur:
+            self._pending_delete = None
+            self.query_one("#load-msg", Static).update("")
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        event.stop()
+        name = getattr(event.row_key, "value", None)
+        if self._closing or not name or name == "__none__":
+            return
+        self._closing = True
+        self.dismiss(name)
+
+    def action_delete(self) -> None:
+        name = self._cur
+        if not name or name == "__none__":
+            return
+        if self._pending_delete == name:
+            delete_save(name, self.saves_dir)
+            self.infos = [i for i in self.infos if i.name != name]
+            self._pending_delete = None
+            self._fill()
+            self.query_one("#load-msg", Static).update(Text(f"deleted '{name}'", style="dim"))
+        else:
+            self._pending_delete = name
+            self.query_one("#load-msg", Static).update(
+                Text(f"press x again to delete '{name}'   (Esc cancels)", style="yellow"))
+
+    def action_cancel(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        self.dismiss(None)
+
+
 class TraderTUI(App):
     CSS = f"""
     Screen {{ layout: vertical; background: #07120b; }}
@@ -360,6 +522,8 @@ class TraderTUI(App):
         Binding("ctrl+c", "force_quit", "Quit", priority=True),
         Binding("ctrl+q", "force_quit", "Quit", priority=True),
         Binding("ctrl+n", "new_world", "New world"),
+        Binding("ctrl+s", "save_game", "Save"),
+        Binding("ctrl+l", "load_game", "Load"),
     ]
 
     def __init__(self, trader: TraderApp):
@@ -376,6 +540,11 @@ class TraderTUI(App):
         self.sort_by_change = False          # sort the board by 1D % instead of natural order
         self.chart_range = 1                 # index into CHART_RANGES (default 1D)
         self.cursor_aid: str | None = None    # asset highlighted on the board (for the name line + chart)
+        self.slot: str | None = None          # current manual save slot (Ctrl+S default)
+        self.saves_dir = SAVES_DIR
+        self.autosave_enabled = True
+        self.resumed = False                  # set by run_tui when launched from an autosave
+        self._last_autosave = 0.0
         self._ticker_base = ""               # cached marquee string; sliced each timer for the scroll
         self._ticker_off = 0
         notable = ["AAPL", "MSFT", "NVDA", "AMZN", "JPM", "XOM", "GOOGL", "TSLA"]
@@ -412,9 +581,17 @@ class TraderTUI(App):
         self.query_one("#chart", Static).border_title = "chart"
         self.set_focus(table)
         self.set_interval(0.3, self._on_timer)
+        self._last_autosave = time.monotonic()
         self._log(Text("╔═ Welcome to TRADER PRO ═╗", style=f"bold {GREEN_HI}"))
-        self._log(Text("Space=play  [ ]=speed  5=movers  o=sort  c=chart  :=command  ?=help",
+        self._log(Text("Space=play  [ ]=speed  5=movers  o=sort  c=chart  Ctrl+S/L=save/load  :=cmd  ?=help",
                        style="bold cyan"))
+        if self.resumed:
+            w = self.trader.world
+            nw = w.portfolio.net_worth(w.price_of)
+            ret = (nw / w.config.starting_cash - 1) * 100
+            self._log(Text(f"▶ Resumed your last game · {fmt_clock(w.market.tick_index)} · "
+                           f"net worth {money(nw)} ({ret:+.1f}%)   (Ctrl+N for a new world)",
+                           style="bold cyan"))
         self._refresh()
 
     # ---- live clock ---- #
@@ -431,6 +608,11 @@ class TraderTUI(App):
         self._log_events(events)
         self._log_closures(closures)
         self._refresh()
+        if self.autosave_enabled:
+            now = time.monotonic()
+            if now - self._last_autosave >= AUTOSAVE_SECS:
+                self._autosave()
+                self._last_autosave = now
 
     def _log_events(self, events) -> None:
         for ev in events[:4]:
@@ -688,7 +870,68 @@ class TraderTUI(App):
     # ---- actions ---- #
 
     def action_force_quit(self) -> None:
+        self._autosave()
         self.exit()
+
+    def action_quit(self) -> None:
+        self._autosave()
+        self.exit()
+
+    def _autosave(self) -> None:
+        if not self.autosave_enabled:
+            return
+        try:
+            save_game(self.trader.world, autosave_path(self.saves_dir), label=AUTOSAVE_SLOT)
+        except Exception:
+            pass
+
+    def action_save_game(self) -> None:
+        self.push_screen(SaveScreen(self.slot or "save"), self._on_save_dismissed)
+
+    def _on_save_dismissed(self, name) -> None:
+        if name:
+            self._do_save(name)
+
+    def action_load_game(self) -> None:
+        infos = list_saves(self.saves_dir)
+        if not infos:
+            self._log(Text("no saves yet — Ctrl+S to save one", style="yellow"))
+            return
+        self.push_screen(LoadScreen(infos, self.saves_dir), self._on_load_dismissed)
+
+    def _on_load_dismissed(self, name) -> None:
+        if name:
+            self._do_load(name)
+
+    def _do_save(self, name: str) -> None:
+        name = re.sub(r"[^A-Za-z0-9_-]", "", name).strip("-_") or "save"
+        try:
+            meta = save_game(self.trader.world, slot_path(name, self.saves_dir), label=name)
+        except Exception as exc:
+            self._log(Text(f"save failed: {exc}", style="red"))
+            return
+        self.slot = name
+        self._log(Text(f"▶ saved → {name} · net worth {money(meta['net_worth'])} "
+                       f"({meta['return_pct']:+.1f}%)", style="cyan"))
+
+    def _do_load(self, name: str) -> None:
+        path = slot_path(name, self.saves_dir)
+        if not path.exists():
+            self._log(Text(f"no save named {name}", style="yellow"))
+            return
+        try:
+            world = load_game(path, self.trader.universe)
+        except Exception as exc:
+            self._log(Text(f"could not load {name}: {exc}", style="red"))
+            return
+        self.trader.start_world(world)
+        self.slot = None if name == AUTOSAVE_SLOT else name
+        nw = world.portfolio.net_worth(world.price_of)
+        ret = (nw / world.config.starting_cash - 1) * 100
+        self.query_one("#log", RichLog).clear()
+        self._log(Text(f"◀ loaded {name} · {fmt_clock(world.market.tick_index)} · "
+                       f"net worth {money(nw)} ({ret:+.1f}%)", style="bold cyan"))
+        self._reset_view_after_swap()
 
     def action_toggle_play(self) -> None:
         self.playing = not self.playing
@@ -756,6 +999,14 @@ class TraderTUI(App):
         world = World.new(self.trader.universe, world_seed=seed, profile=profile,
                           starting_cash=cash, fee_level=fee_level)
         self.trader.start_world(world)
+        self.slot = None
+        self.query_one("#log", RichLog).clear()
+        self._log(Text(f"★ new world  ·  seed {seed} · {profile} · "
+                       f"{money(cash)} · fees {fee_level}", style="bold cyan"))
+        self._reset_view_after_swap()
+
+    def _reset_view_after_swap(self) -> None:
+        """Reset all view state after a world swap (new world / load), then redraw + home."""
         self.view_source = None
         self.view_label = "watchlist"
         self.view_page = 0
@@ -764,9 +1015,6 @@ class TraderTUI(App):
         self.sort_by_change = False
         self.cursor_aid = None
         self.playing = False
-        self.query_one("#log", RichLog).clear()
-        self._log(Text(f"★ new world  ·  seed {seed} · {profile} · "
-                       f"{money(cash)} · fees {fee_level}", style="bold cyan"))
         self._refresh()
         board = self.query_one("#board", DataTable)
         self.set_focus(board)
@@ -793,6 +1041,8 @@ class TraderTUI(App):
         self._refresh()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if len(self.screen_stack) > 1:        # event bubbled up from a modal's table
+            return
         aid = event.row_key.value
         if aid == "__next__":
             self.view_page += 1
@@ -806,6 +1056,8 @@ class TraderTUI(App):
             self.push_screen(TradeDialog(aid), self._on_trade_closed)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if len(self.screen_stack) > 1:        # event bubbled up from a modal's table
+            return
         key = getattr(event.row_key, "value", None)
         w = self.trader.world
         self.cursor_aid = key if (key and w.has_asset(key)) else None
@@ -882,11 +1134,21 @@ class TraderTUI(App):
             self.playing = True; self._log(Text("▶ live (Space to pause)", style="cyan"))
             self._refresh(); return
         if cmd in ("quit", "exit"):
-            self.exit(); return
+            self.action_quit(); return
         if cmd in ("help", "?"):
             self.push_screen(HelpScreen()); return
         if cmd == "clear":
             self.query_one("#log", RichLog).clear(); return
+        if cmd == "save":
+            self._do_save(args[0] if args else (self.slot or "save")); return
+        if cmd == "load":
+            if args:
+                self._do_load(args[0])
+            else:
+                self.action_load_game()
+            return
+        if cmd in ("saves", "slots"):
+            self.action_load_game(); return
         if cmd in ("port", "portfolio", "p"):
             self._log(Text("(your positions & P&L are in the panel above)", style="dim"))
             self._refresh(); return
@@ -928,9 +1190,21 @@ class TraderTUI(App):
 
 def run_tui() -> None:
     universe = load_seed_universe()
-    trader = TraderApp(World.new(universe, world_seed=20260614, profile="Normal",
-                                 starting_cash=5000.0, fee_level="off"), universe=universe)
-    TraderTUI(trader).run()
+    world = None
+    resumed = False
+    if has_autosave():
+        try:
+            world = load_game(autosave_path(), universe)
+            resumed = True
+        except Exception:
+            world = None
+    if world is None:
+        world = World.new(universe, world_seed=20260614, profile="Normal",
+                          starting_cash=5000.0, fee_level="off")
+    trader = TraderApp(world, universe=universe)
+    app = TraderTUI(trader)
+    app.resumed = resumed
+    app.run()
 
 
 if __name__ == "__main__":

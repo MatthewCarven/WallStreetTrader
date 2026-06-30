@@ -56,7 +56,12 @@ highlighted asset**, your positions, and a scrolling news log.
 | `Enter` | open the trade dialog for the highlighted asset |
 | `:` | command line (every CLI command below works) |
 | `Ctrl+N` | new world |
-| `?` | help · `q` quit |
+| `Ctrl+S` / `Ctrl+L` | save · load (the load browser lists slots with net worth, return, and age) |
+| `?` | help · `q` quit (autosaves first) |
+
+The game **autosaves** as you play and on quit; relaunching `play_tui.py` **resumes your last
+game** automatically (press `Ctrl+N` for a fresh one). Saves live in `saves/<slot>.world` and are
+written atomically (a crash mid-save can't corrupt a slot).
 
 > **Textual version note.** The TUI is pinned to `textual>=0.50,<0.72`. Textual 0.72.0
 > introduced a regression that deadlocks the trade-dialog teardown and freezes the whole
@@ -73,6 +78,8 @@ market | m                overview: your holdings + the crypto board
 stocks [n] | bonds | crypto [n]   list a kind
 find <text>               search by name or symbol
 look <SYM> | l            asset detail + a recent price sparkline
+save [name] | load [name] persist / restore a slot   (load with no name opens the browser)
+saves                     browse, load, or delete save slots
 buy  <SYM> <qty|$amount>   e.g. 'buy AAPL 10'  or  'buy BTR $500'
 sell <SYM> <qty|all>       e.g. 'sell AAPL 5'  or  'sell BTR all'
 short <SYM> <qty|$amt>     open/extend a short (profit if it falls)
