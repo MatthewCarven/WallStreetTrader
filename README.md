@@ -40,8 +40,9 @@ pip install "textual<0.72"      # see the version note below
 python play_tui.py              # or:  python -m trader_pro.tui  (or: start.cmd)
 ```
 
-The market **ticks live**. The board shows your holdings plus a watchlist; the right column
-shows positions, a net-worth sparkline, and a scrolling news log.
+The market **ticks live**. An amber ticker tape scrolls under the header; the board shows your
+holdings plus a watchlist; the right column shows a net-worth sparkline, a **live price chart of the
+highlighted asset**, your positions, and a scrolling news log.
 
 | Key | Action |
 |---|---|
@@ -49,6 +50,9 @@ shows positions, a net-worth sparkline, and a scrolling news log.
 | `[` / `]` | slower / faster |
 | `s` / `h` / `d` | step 1 minute / 1 hour / 1 day |
 | `0`–`4` | board view: 0 owned · 1 crypto · 2 stocks · 3 bonds · 4 watchlist |
+| `5` | top movers — biggest 1D% gainers & losers across the market |
+| `o` | sort the board by 1D % (toggle) |
+| `c` | cycle the chart range (1H → 1D → 3D → 1W) |
 | `Enter` | open the trade dialog for the highlighted asset |
 | `:` | command line (every CLI command below works) |
 | `Ctrl+N` | new world |

@@ -483,3 +483,39 @@ Verified on Textual 0.71.0 (real terminal): Ctrl+N opens the form (fields pre-fi
 the game untouched, Enter starts a fresh market (seed re-rolled, net worth reset to the stake,
 board/sparkline reset), the app stays responsive, and the modal tears down with **no freeze**.
 46 core tests still pass.
+
+## 2026-06-30 — TUI V1.6: price-chart pane, top movers, sorting + a retro skin
+
+Matthew picked three TUI upgrades. All landed together; 55 tests pass (Textual 0.71.0).
+
+**Price-chart pane** (`tui.py`). A new bordered `#chart` panel in the right column, between the
+net-worth panel and the portfolio list. It draws the *highlighted* asset's recent price path as a
+multi-row filled area chart — full blocks plus an 8-level fractional top cell, so a 7-row panel
+gives ~56 levels of vertical resolution (`area_chart()`). The range cycles **1H → 1D → 3D → 1W**
+with the **`c`** key. It redraws on cursor-move (same hook as the name line) so arrowing the board
+flips through charts instantly, and it sizes itself to the panel (`panel.size`), so it adapts to
+the terminal. Series come straight from `engine.series(aid, start, t+1, step)` — ~26 price points,
+cheap, and nothing extra to store (prices are still a pure function of seed+tick).
+
+**Top movers + sorting** (`tui.py`). New **`5`** / `movers` view lists the 10 biggest 1D% gainers
+and 10 biggest losers across the whole market, with green **▲ TOP GAINERS** / red **▼ TOP LOSERS**
+separator rows (`_movers()`, special-cased in `_refresh`). Separately, **`o`** / `sort` toggles the
+current board view between natural order and **1D % descending** (`_visible` sorts the candidate
+page; the title shows `↓%`). Shared `_chg1d()` helper backs movers, sorting, the ticker, and the
+board's 1D% column. Movers recomputes ~537 changes on refresh, only while that view is open.
+
+**Retro skin** (`tui.py`). A green-phosphor palette (CSS: dark `#07120b` ground, green/amber panel
+borders), amber title/sub-title, and an **amber scrolling ticker tape** docked under the header
+(`#ticker`): watchlist symbols + price + ▲/▼%, rebuilt each refresh and sliced by a per-timer
+offset for the marquee scroll. The clock-timer now early-returns whenever a modal is up
+(`len(self.screen_stack) > 1`) — the market pauses behind Help/Trade/New-world and, crucially, the
+ticker stops querying base-screen widgets that aren't in the modal's scope (was a `NoMatches` crash).
+
+New regression test `tests/test_tui_features.py`: area-chart shape, ticker scroll, chart-range
+cycling, movers ordering + row count, the sort toggle, and the modal/timer guard.
+
+**Process note (for next time):** the editor file-write truncated `test_tui_features.py` mid-file
+again on this mounted folder, and pytest's rewritten-assert cache went stale (mount mtime is
+coarse), so edits silently ran old bytecode. Fix that bit me for a while: write to the mounted
+folder via the shell (heredoc), and run pytest with `PYTHONDONTWRITEBYTECODE=1 -p no:cacheprovider`
+after `rm -rf` of `__pycache__`. Matches the standing "shell writes are reliable" note.

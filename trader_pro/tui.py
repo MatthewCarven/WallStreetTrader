@@ -5,6 +5,9 @@
 Wraps the same `TraderApp` logic the CLI uses, but the market *ticks live*. Browse commands
 (stocks/crypto/bonds/find) repopulate the main board; trades/loans/predictions print a short
 line to the news log; `help` and `look` open a panel. Requires `textual`.
+
+Retro layer (V1.6): an amber scrolling ticker tape under the header, a per-asset price-chart
+pane, a top-movers view + a sort-by-%-change toggle, and a green-phosphor colour scheme.
 """
 
 from __future__ import annotations
@@ -18,10 +21,19 @@ from rich.text import Text
 
 from .cli import TraderApp
 from .core import AssetKind, Order, OrderSide, World, execute_order, load_seed_universe
-from .core.engine import DAY, HOUR
+from .core.engine import DAY, HOUR, WEEK
 
 SPEEDS = [("Slow", 1), ("Normal", 12), ("Fast", 90), ("Turbo", 600)]
 SPARK = "▁▂▃▄▅▆▇█"
+BLOCKS8 = " ▁▂▃▄▅▆▇"          # 0..7 sub-cell fill for the area chart's top row
+FULL = "█"
+CHART_RANGES = [("1H", HOUR), ("1D", DAY), ("3D", 3 * DAY), ("1W", WEEK)]
+TICKER_COLOR = "#ffb000"       # amber phosphor
+
+# retro green-phosphor palette
+GREEN = "#2fae4e"
+GREEN_HI = "#38c172"
+AMBER = "#ffb000"
 
 
 def money(x: float) -> str:
@@ -42,11 +54,62 @@ def sparkline(vals: list[float]) -> str:
     return "".join(SPARK[int((v - lo) / (hi - lo) * (len(SPARK) - 1))] for v in vals)
 
 
+def area_chart(vals: list[float], width: int, height: int, color: str) -> Text:
+    """A filled multi-row area chart of `vals`, resampled to `width` columns and `height` rows.
+    Uses full blocks plus an 8-level fractional top cell, so a 7-row panel gives ~56 levels of
+    vertical resolution. Returns a coloured Rich Text (rows joined by newlines)."""
+    vals = [v for v in vals if v == v]
+    if len(vals) < 2:
+        return Text("(not enough data yet)", style="dim")
+    n = len(vals)
+    if n > width:
+        step = n / width
+        sample = [vals[min(n - 1, int(i * step))] for i in range(width)]
+        sample[-1] = vals[-1]
+    else:
+        sample = vals
+    lo, hi = min(sample), max(sample)
+    span = hi - lo
+    if span < 1e-12:                       # flat line — draw a baseline mid-panel
+        mid = height // 2
+        rows = [(FULL * len(sample)) if r == mid else (" " * len(sample)) for r in range(height)]
+        out = Text()
+        for i, line in enumerate(reversed(rows)):
+            out.append(line, style=color)
+            if i != height - 1:
+                out.append("\n")
+        return out
+    grid: list[str] = []
+    for r in range(height):                # r = 0 is the bottom row
+        chars = []
+        for v in sample:
+            eighths = (v - lo) / span * (height * 8)
+            full = int(eighths // 8)
+            rem = int(eighths % 8)
+            if r < full:
+                chars.append(FULL)
+            elif r == full:
+                chars.append(BLOCKS8[rem])
+            else:
+                chars.append(" ")
+        grid.append("".join(chars))
+    grid.reverse()                         # render top row first
+    out = Text()
+    for i, line in enumerate(grid):
+        out.append(line, style=color)
+        if i != len(grid) - 1:
+            out.append("\n")
+    return out
+
+
 HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
 
 [b]Keys[/]
   Space   play / pause the live clock
   0 1 2 3 4 view owned / crypto / stocks / bonds / watchlist
+  5        top movers (biggest gainers & losers, whole market)
+  o        sort the board by 1D %  (toggle)
+  c        cycle the chart range   (1H → 1D → 3D → 1W)
   Enter   open a buy/sell dialog for the highlighted row
   [  ]     slower / faster   (Slow → Turbo)
   s        step one minute      h  +1 hour      d  +1 day
@@ -59,6 +122,7 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
     market            your holdings + watchlist
     stocks [n]        first n stocks (default 25)
     crypto / bonds    list a class
+    movers            top gainers & losers      sort   toggle %-sort
     find <text>       search by name or symbol
     watch <SYM>       add a symbol to the watchlist
   [b]Info[/]:
@@ -260,17 +324,19 @@ class NewWorldScreen(ModalScreen):
 
 
 class TraderTUI(App):
-    CSS = """
-    Screen { layout: vertical; }
-    #status { height: 4; padding: 0 1; background: $panel; }
-    #body { height: 1fr; }
-    #board { width: 2fr; border: round $primary; }
-    #side { width: 1fr; }
-    #equity { height: 6; border: round $primary; padding: 0 1; }
-    #port { height: 1fr; padding: 0 1; background: $panel; }
-    #log { height: 1fr; border: round $primary; overflow-x: hidden; }
-    #cmd { dock: bottom; }
-    DataTable { height: 1fr; }
+    CSS = f"""
+    Screen {{ layout: vertical; background: #07120b; }}
+    #ticker {{ height: 1; background: #000000; color: {AMBER}; padding: 0 1; }}
+    #status {{ height: 4; padding: 0 1; background: #0d1f14; color: #b8f0c0; }}
+    #body {{ height: 1fr; }}
+    #board {{ width: 2fr; border: round {GREEN}; }}
+    #side {{ width: 1fr; }}
+    #equity {{ height: 6; border: round {AMBER}; padding: 0 1; }}
+    #chart {{ height: 10; border: round {GREEN_HI}; padding: 0 1; }}
+    #port {{ height: 1fr; padding: 0 1; background: #0d1f14; }}
+    #log {{ height: 1fr; border: round {GREEN}; overflow-x: hidden; }}
+    #cmd {{ dock: bottom; }}
+    DataTable {{ height: 1fr; }}
     """
 
     BINDINGS = [
@@ -286,6 +352,9 @@ class TraderTUI(App):
         ("3", "view_bonds", "Bonds"),
         ("4", "view_watch", "Watch"),
         ("0", "view_owned", "Owned"),
+        ("5", "view_movers", "Movers"),
+        ("o", "toggle_sort", "Sort %"),
+        ("c", "chart_range", "Chart range"),
         ("question_mark", "help", "Help"),
         ("q", "quit", "Quit"),
         Binding("ctrl+c", "force_quit", "Quit", priority=True),
@@ -303,7 +372,12 @@ class TraderTUI(App):
         self.view_page = 0
         self.page_size = 25
         self.owned_only = False
-        self.cursor_aid: str | None = None    # asset highlighted on the board (for the name line)
+        self.movers = False                  # movers view (top gainers/losers across the market)
+        self.sort_by_change = False          # sort the board by 1D % instead of natural order
+        self.chart_range = 1                 # index into CHART_RANGES (default 1D)
+        self.cursor_aid: str | None = None    # asset highlighted on the board (for the name line + chart)
+        self._ticker_base = ""               # cached marquee string; sliced each timer for the scroll
+        self._ticker_off = 0
         notable = ["AAPL", "MSFT", "NVDA", "AMZN", "JPM", "XOM", "GOOGL", "TSLA"]
         w = trader.world
         self.watch: list[str] = [f"CRYPTO:{c.symbol}" for c in w.universe.crypto]
@@ -315,30 +389,42 @@ class TraderTUI(App):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
+        yield Static(id="ticker")
         yield Static(id="status")
         with Horizontal(id="body"):
             yield DataTable(id="board", zebra_stripes=True, cursor_type="row")
             with Vertical(id="side"):
                 yield Static(id="equity")
+                yield Static(id="chart")
                 yield Static(id="port")
                 yield RichLog(id="log", wrap=True, markup=True)
-        yield Input(placeholder="press : for a command  (buy BTR $500 · short SLR 50 · stocks · find tesla · predict NVDA 1d · help)", id="cmd")
+        yield Input(placeholder="press : for a command  (buy BTR $500 · short SLR 50 · movers · find tesla · predict NVDA 1d · help)", id="cmd")
         yield Footer()
 
     def on_mount(self) -> None:
+        self.title = "TRADER PRO"
+        self.sub_title = "◆ retro market terminal"
         table = self.query_one("#board", DataTable)
         table.add_columns("Symbol", "Price", "1D %", "Pos", "Value")
         table.border_title = "MARKET · watchlist"
         self.query_one("#log", RichLog).border_title = "news & log"
         self.query_one("#equity", Static).border_title = "net worth"
+        self.query_one("#chart", Static).border_title = "chart"
         self.set_focus(table)
         self.set_interval(0.3, self._on_timer)
-        self._log(Text("Welcome to Trader PRO.  Space=play  [ ]=speed  :=command  ?=help", style="bold cyan"))
+        self._log(Text("╔═ Welcome to TRADER PRO ═╗", style=f"bold {GREEN_HI}"))
+        self._log(Text("Space=play  [ ]=speed  5=movers  o=sort  c=chart  :=command  ?=help",
+                       style="bold cyan"))
         self._refresh()
 
     # ---- live clock ---- #
 
     def _on_timer(self) -> None:
+        # While a modal (Help / Trade / New-world) is up it owns the screen, so the base-screen
+        # widgets (#ticker/#board/...) aren't queryable -- and the market effectively pauses.
+        if len(self.screen_stack) > 1:
+            return
+        self._tick_ticker()                  # scroll the marquee even while paused
         if not self.playing:
             return
         events, closures = self.trader._advance(SPEEDS[self.speed_idx][1])
@@ -358,25 +444,76 @@ class TraderTUI(App):
             self._log(Text(f"⚠ MARGIN CALL — closed {c.order.quantity:g} {sym} "
                            f"@ {money(c.price)} (P&L {c.realized_pnl:+,.2f})", style="bold red"))
 
+    # ---- shared math ---- #
+
+    def _chg1d(self, aid: str) -> float:
+        """1-day % change for an asset (price now vs one DAY ago)."""
+        w, eng = self.trader.world, self.trader.engine
+        t = w.market.tick_index
+        price = w.price(aid)
+        prev = eng.price_at(aid, max(0, t - DAY))
+        return (price / prev - 1) * 100 if prev > 0 else 0.0
+
+    def _movers(self, n: int = 10) -> tuple[list[tuple[float, str]], list[tuple[float, str]]]:
+        """(gainers, losers) — the n biggest 1D% up/down moves across the whole market."""
+        w = self.trader.world
+        rows = [(self._chg1d(aid), aid) for aid in w.asset_ids()]
+        rows.sort(reverse=True)
+        gainers = rows[:n]
+        losers = rows[-n:][::-1]             # biggest loser first
+        return gainers, losers
+
+    # ---- ticker tape ---- #
+
+    def _build_ticker(self) -> None:
+        w = self.trader.world
+        segs = []
+        for aid in self.watch[:18]:
+            if not w.has_asset(aid):
+                continue
+            chg = self._chg1d(aid)
+            arr = "▲" if chg >= 0 else "▼"
+            segs.append(f"{aid.split(':',1)[1]} {w.price(aid):,.2f} {arr}{abs(chg):.1f}%")
+        self._ticker_base = "     ".join(segs) + "     " if segs else ""
+
+    def _tick_ticker(self) -> None:
+        base = self._ticker_base
+        if not base:
+            return
+        self._ticker_off = (self._ticker_off + 1) % len(base)
+        width = max(10, (self.size.width or 80) - 2)
+        stream = base
+        while len(stream) < self._ticker_off + width:
+            stream += base
+        view = stream[self._ticker_off:self._ticker_off + width]
+        self.query_one("#ticker", Static).update(Text(view, style=f"bold {TICKER_COLOR}"))
+
     # ---- rendering ---- #
 
     def _visible(self) -> tuple[list[str], str | None]:
         """(asset_ids_to_show, next_row_label). Holdings of the current view pin to the top;
-        then a page of `page_size` assets you don't own. A non-None label => add a Next row."""
+        then a page of `page_size` assets you don't own. A non-None label => add a Next row.
+        With `sort_by_change` on, the candidate page is ordered by 1D % (descending)."""
         w = self.trader.world
         held = [a for a in w.portfolio.positions if w.has_asset(a)]
         if self.owned_only:
+            if self.sort_by_change:
+                held = sorted(held, key=self._chg1d, reverse=True)
             return held, None
         if self.view_source is None:
             seen, out = set(), []
             for aid in held + self.watch:
                 if aid not in seen and w.has_asset(aid):
                     seen.add(aid); out.append(aid)
+            if self.sort_by_change:
+                out = sorted(out, key=self._chg1d, reverse=True)
             return out, None
         src = set(self.view_source)
         held = [a for a in held if a in src]
         owned = set(held)
         cands = [a for a in self.view_source if a not in owned and w.has_asset(a)]
+        if self.sort_by_change:
+            cands = sorted(cands, key=self._chg1d, reverse=True)
         if not cands:
             return held, None
         total = (len(cands) + self.page_size - 1) // self.page_size
@@ -418,37 +555,89 @@ class TraderTUI(App):
             status.append(f"   · {w.kind_of(aid).name.title()}", style="dim")
         self.query_one("#status", Static).update(status)
 
+    def _render_chart(self) -> None:
+        """Render the price-chart pane for the currently highlighted asset. Range is set by
+        `chart_range` (1H/1D/3D/1W) and cycled with the `c` key. Sizes itself to the panel."""
+        w, eng = self.trader.world, self.trader.engine
+        panel = self.query_one("#chart", Static)
+        aid = self.cursor_aid
+        if not (aid and w.has_asset(aid)):
+            panel.border_title = "chart"
+            panel.update(Text("highlight an asset to chart it ▲▼", style="dim"))
+            return
+        label, span = CHART_RANGES[self.chart_range]
+        cw = max(8, (panel.size.width or 28) - 4)
+        ch = max(3, (panel.size.height or 10) - 3)
+        t = w.market.tick_index
+        start = max(0, t - span)
+        step = max(1, span // cw)
+        vals = [p for _, p in eng.series(aid, start, t + 1, step)]
+        cur = w.price(aid)
+        first = vals[0] if vals else cur
+        chg = (cur / first - 1) * 100 if first else 0.0
+        tone = "green" if chg >= 0 else "red"
+        lo, hi = (min(vals), max(vals)) if vals else (cur, cur)
+        panel.border_title = f"chart · {aid.split(':',1)[1]} {label}"
+        body = area_chart(vals, cw, ch, tone)
+        out = Text()
+        out.append_text(body)
+        out.append("\n")
+        out.append(f"{money(cur)} ", style=f"bold {tone}")
+        out.append(f"{chg:+.2f}%  ", style=tone)
+        out.append(f"hi ${hi:,.0f} lo ${lo:,.0f}", style="dim")
+        panel.update(out)
+
+    def _add_row(self, table: DataTable, aid: str) -> None:
+        w, eng = self.trader.world, self.trader.engine
+        pf = w.portfolio
+        t = w.market.tick_index
+        price = w.price(aid)
+        prev = eng.price_at(aid, max(0, t - DAY))
+        chg = (price / prev - 1) * 100 if prev > 0 else 0.0
+        pos = pf.positions.get(aid)
+        qty = pos.quantity if pos else 0.0
+        table.add_row(
+            Text(aid.split(":", 1)[1], style="bold"),
+            Text(money(price), justify="right"),
+            Text(f"{chg:+.2f}%", style="green" if chg >= 0 else "red", justify="right"),
+            Text(f"{qty:g}" if qty else "·", justify="right",
+                 style="yellow" if qty < 0 else ("white" if qty else "dim")),
+            Text(money(qty * price) if qty else "", justify="right"),
+            key=aid,
+        )
+
     def _refresh(self) -> None:
         w = self.trader.world
         pf = w.portfolio
         po = w.price_of
-        t = w.market.tick_index
-        eng = self.trader.engine
 
         self._render_status()
+        self._build_ticker()
+        self._render_chart()
 
         table = self.query_one("#board", DataTable)
-        table.border_title = f"MARKET · {self.view_label}"
         table.clear()
-        ids, next_label = self._visible()
-        for aid in ids:
-            price = w.price(aid)
-            prev = eng.price_at(aid, max(0, t - DAY))
-            chg = (price / prev - 1) * 100 if prev > 0 else 0.0
-            pos = pf.positions.get(aid)
-            qty = pos.quantity if pos else 0.0
-            table.add_row(
-                Text(aid.split(":", 1)[1], style="bold"),
-                Text(money(price), justify="right"),
-                Text(f"{chg:+.2f}%", style="green" if chg >= 0 else "red", justify="right"),
-                Text(f"{qty:g}" if qty else "·", justify="right",
-                     style="yellow" if qty < 0 else ("white" if qty else "dim")),
-                Text(money(qty * price) if qty else "", justify="right"),
-                key=aid,
-            )
-        if next_label:
-            table.add_row(Text("\u2192 " + next_label, style="bold cyan"),
-                          Text(""), Text(""), Text(""), Text(""), key="__next__")
+        if self.movers:
+            table.border_title = "MARKET · movers"
+            gainers, losers = self._movers(10)
+            table.add_row(Text("▲ TOP GAINERS", style="bold green"),
+                          Text(""), Text("1D %", style="dim", justify="right"), Text(""), Text(""),
+                          key="__hdr_g__")
+            for _, aid in gainers:
+                self._add_row(table, aid)
+            table.add_row(Text("▼ TOP LOSERS", style="bold red"),
+                          Text(""), Text(""), Text(""), Text(""), key="__hdr_l__")
+            for _, aid in losers:
+                self._add_row(table, aid)
+        else:
+            sort_tag = "  ↓%" if self.sort_by_change else ""
+            table.border_title = f"MARKET · {self.view_label}{sort_tag}"
+            ids, next_label = self._visible()
+            for aid in ids:
+                self._add_row(table, aid)
+            if next_label:
+                table.add_row(Text("→ " + next_label, style="bold cyan"),
+                              Text(""), Text(""), Text(""), Text(""), key="__next__")
 
         port = Text()
         if not pf.positions:
@@ -530,6 +719,33 @@ class TraderTUI(App):
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
 
+    def action_chart_range(self) -> None:
+        self.chart_range = (self.chart_range + 1) % len(CHART_RANGES)
+        self._render_chart()
+
+    def action_toggle_sort(self) -> None:
+        self.sort_by_change = not self.sort_by_change
+        self.view_page = 0
+        self._log(Text("sort → " + ("1D % (high→low)" if self.sort_by_change else "default order"),
+                       style="dim"))
+        self._refresh()
+        try:
+            self.query_one("#board", DataTable).move_cursor(row=0)
+        except Exception:
+            pass
+
+    def action_view_movers(self) -> None:
+        self.movers = True
+        self.owned_only = False
+        self.view_source = None
+        self.view_label = "movers"
+        self._log(Text("board → movers (top gainers & losers)", style="dim"))
+        self._refresh()
+        try:
+            self.query_one("#board", DataTable).move_cursor(row=1)
+        except Exception:
+            pass
+
     def action_new_world(self) -> None:
         self.push_screen(NewWorldScreen(), self._on_new_world)
 
@@ -544,6 +760,8 @@ class TraderTUI(App):
         self.view_label = "watchlist"
         self.view_page = 0
         self.owned_only = False
+        self.movers = False
+        self.sort_by_change = False
         self.cursor_aid = None
         self.playing = False
         self.query_one("#log", RichLog).clear()
@@ -590,8 +808,9 @@ class TraderTUI(App):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         key = getattr(event.row_key, "value", None)
         w = self.trader.world
-        self.cursor_aid = key if (key and key != "__next__" and w.has_asset(key)) else None
+        self.cursor_aid = key if (key and w.has_asset(key)) else None
         self._render_status()
+        self._render_chart()
 
     def _on_trade_closed(self, result) -> None:
         """Runs on the app after a TradeDialog pops. `result` is None on cancel, else
@@ -611,6 +830,7 @@ class TraderTUI(App):
         self.view_label = label
         self.view_page = 0
         self.owned_only = False
+        self.movers = False
         self._log(Text(f"board → {label}", style="dim"))
         self._refresh()
 
@@ -686,6 +906,10 @@ class TraderTUI(App):
             self._set_view(self._kind_ids(AssetKind.BOND), "bonds"); return
         if cmd == "crypto":
             self._set_view(self._kind_ids(AssetKind.CRYPTO), "crypto"); return
+        if cmd == "movers":
+            self.action_view_movers(); return
+        if cmd == "sort":
+            self.action_toggle_sort(); return
         if cmd == "find":
             if not args:
                 self._log(Text("usage: find <text>", style="yellow")); return
