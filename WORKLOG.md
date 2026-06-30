@@ -575,3 +575,15 @@ Tests in `tests/test_version_guard.py` (parser across 0.50→2.x, and that run_t
 Proper long-term fix still open: the freeze is upstream in Textual's teardown of *this* ModalScreen;
 the dependable cure is to move the trade UI off `ModalScreen` (an inline, non-modal panel toggled
 with `display`), which would lift the version cap entirely. Flagged for a follow-up.
+
+## 2026-06-30 — TUI: keep the board's row selection across time-advance / live play
+
+Annoyance Matthew spotted: every `_refresh()` rebuilds the board with `table.clear()`, which snaps
+the DataTable cursor back to row 0 — so pressing s/h/d, or just letting the clock run, kept yanking
+the highlight (and the chart pane) back to the top.
+
+Fix in `_refresh` (`tui.py`): capture the highlighted row's key before `clear()`, collect the new
+row order, then restore the cursor — by the same asset if it's still listed, else by clamped
+position. View switches (`_set_view`) now explicitly `move_cursor(row=0)` so changing class still
+starts at the top (movers still lands on row 1; new-world/load reset as before).
+`tests/test_tui_selection.py` covers it. 67 tests pass.

@@ -798,28 +798,53 @@ class TraderTUI(App):
         self._render_chart()
 
         table = self.query_one("#board", DataTable)
+        # Remember which row is highlighted so advancing time (s/h/d), live play, or a trade
+        # doesn't snap the selection back to the top when the board is rebuilt below.
+        prev_key = None
+        if table.row_count:
+            try:
+                prev_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+            except Exception:
+                prev_key = None
+        prev_row = table.cursor_row
         table.clear()
+        row_keys: list[str] = []
         if self.movers:
             table.border_title = "MARKET · movers"
             gainers, losers = self._movers(10)
             table.add_row(Text("▲ TOP GAINERS", style="bold green"),
                           Text(""), Text("1D %", style="dim", justify="right"), Text(""), Text(""),
                           key="__hdr_g__")
+            row_keys.append("__hdr_g__")
             for _, aid in gainers:
-                self._add_row(table, aid)
+                self._add_row(table, aid); row_keys.append(aid)
             table.add_row(Text("▼ TOP LOSERS", style="bold red"),
                           Text(""), Text(""), Text(""), Text(""), key="__hdr_l__")
+            row_keys.append("__hdr_l__")
             for _, aid in losers:
-                self._add_row(table, aid)
+                self._add_row(table, aid); row_keys.append(aid)
         else:
             sort_tag = "  ↓%" if self.sort_by_change else ""
             table.border_title = f"MARKET · {self.view_label}{sort_tag}"
             ids, next_label = self._visible()
             for aid in ids:
-                self._add_row(table, aid)
+                self._add_row(table, aid); row_keys.append(aid)
             if next_label:
                 table.add_row(Text("→ " + next_label, style="bold cyan"),
                               Text(""), Text(""), Text(""), Text(""), key="__next__")
+                row_keys.append("__next__")
+        # Restore the highlight: by the same asset if it's still listed, else by position.
+        if prev_key is not None and prev_key in row_keys:
+            target = row_keys.index(prev_key)
+        elif row_keys:
+            target = min(prev_row, len(row_keys) - 1)
+        else:
+            target = -1
+        if target >= 0 and target != table.cursor_row:
+            try:
+                table.move_cursor(row=target)
+            except Exception:
+                pass
 
         port = Text()
         if not pf.positions:
@@ -1085,6 +1110,10 @@ class TraderTUI(App):
         self.movers = False
         self._log(Text(f"board → {label}", style="dim"))
         self._refresh()
+        try:
+            self.query_one("#board", DataTable).move_cursor(row=0)
+        except Exception:
+            pass
 
     def _kind_ids(self, kind: AssetKind) -> list[str]:
         w = self.trader.world
