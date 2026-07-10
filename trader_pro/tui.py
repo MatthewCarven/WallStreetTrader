@@ -133,8 +133,8 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
   5        top movers (biggest gainers & losers, whole market)
   o        sort the board by 1D %  (toggle)
   c        cycle the chart range   (1H → 1D → 3D → 1W)
-  Ctrl+1…6 show / hide a board column  (toggle)
-           [dim]1 Symbol · 2 Price · 3 1D% · 4 Pos · 5 Value · 6 Cost[/]
+  Ctrl+1…7 show / hide a board column  (toggle)
+           [dim]1 Symbol · 2 Price · 3 1D% · 4 Pos · 5 Value · 6 Cost · 7 P&L[/]
   Enter   open a buy/sell dialog for the highlighted row
   [  ]     slower / faster   (Slow → Turbo)
   s        step one minute      h  +1 hour      d  +1 day
@@ -489,11 +489,11 @@ class LoadScreen(ModalScreen):
 
 
 # ---- market board columns ---- #
-# The board is built from this spec so columns can be shown/hidden at runtime. Ctrl+1..Ctrl+6
-# map to the six ids below, in this order. Each entry is (id, header, render), where `render`
+# The board is built from this spec so columns can be shown/hidden at runtime. Ctrl+1..Ctrl+7
+# map to the seven ids below, in this order. Each entry is (id, header, render), where `render`
 # turns a per-row context (`_RowCtx`) into that column's cell. Keep the list, the Ctrl+N
 # bindings, and the Ctrl+N help line in sync if you add or reorder columns.
-_RowCtx = namedtuple("_RowCtx", "sym price chg qty value cost")
+_RowCtx = namedtuple("_RowCtx", "sym price chg qty value cost pnl")
 
 BOARD_COLUMNS = [
     ("symbol", "Symbol",
@@ -510,6 +510,9 @@ BOARD_COLUMNS = [
                        style="green" if c.value > 0 else ("red" if c.value < 0 else "dim"))),
     ("cost", "Cost / Share",
         lambda c: Text(money(c.cost) if c.cost else "·", justify="right", style="dim")),
+    ("pnl", "P&L %",
+        lambda c: Text(f"{c.pnl:+.2f}%" if c.qty and c.cost else "·", justify="right",
+                       style="green" if c.pnl > 0 else ("red" if c.pnl < 0 else "dim"))),
 ]
 
 
@@ -545,7 +548,7 @@ class TraderTUI(App):
         ("5", "view_movers", "Movers"),
         ("o", "toggle_sort", "Sort %"),
         ("c", "chart_range", "Chart range"),
-        # Ctrl+1..Ctrl+6 show/hide the six board columns (kept off the footer to avoid clutter;
+        # Ctrl+1..Ctrl+7 show/hide the seven board columns (kept off the footer to avoid clutter;
         # documented in the help panel). Ids/order must match BOARD_COLUMNS.
         Binding("ctrl+1", "toggle_column('symbol')", "Col Symbol", show=False),
         Binding("ctrl+2", "toggle_column('price')", "Col Price", show=False),
@@ -553,6 +556,7 @@ class TraderTUI(App):
         Binding("ctrl+4", "toggle_column('pos')", "Col Pos", show=False),
         Binding("ctrl+5", "toggle_column('value')", "Col Value", show=False),
         Binding("ctrl+6", "toggle_column('cost')", "Col Cost", show=False),
+        Binding("ctrl+7", "toggle_column('pnl')", "Col P&L%", show=False),
         ("question_mark", "help", "Help"),
         ("q", "quit", "Quit"),
         Binding("ctrl+c", "force_quit", "Quit", priority=True),
@@ -833,8 +837,11 @@ class TraderTUI(App):
         chg = (price / prev - 1) * 100 if prev > 0 else 0.0
         pos = pf.positions.get(aid)
         qty = pos.quantity if pos else 0.0
-        ctx = _RowCtx(aid.split(":", 1)[1], price, chg, qty, qty * price,
-                      pos.avg_cost if pos else 0.0)
+        cost = pos.avg_cost if pos else 0.0
+        # Unrealized return if you closed the position now: +% when in profit, for longs and shorts
+        # alike (a short profits as price falls). Fees are ignored, matching the side panel's P&L.
+        pnl = (price - cost) / cost * 100 * (1.0 if qty >= 0 else -1.0) if (qty and cost) else 0.0
+        ctx = _RowCtx(aid.split(":", 1)[1], price, chg, qty, qty * price, cost, pnl)
         table.add_row(*[render(ctx) for _, _, render in self._visible_columns()], key=aid)
 
     def _refresh(self, keep_row: bool = False) -> None:
@@ -1050,7 +1057,7 @@ class TraderTUI(App):
         self._render_chart()
 
     def action_toggle_column(self, cid: str) -> None:
-        """Show/hide a board column (Ctrl+1..Ctrl+6). Session-only -- resets to all-on next launch.
+        """Show/hide a board column (Ctrl+1..Ctrl+7). Session-only -- resets to all-on next launch.
         Refuses to hide the last remaining column so the board never ends up with zero columns."""
         # A modal owns the screen while it's open (the board isn't queryable) -- ignore the key.
         if len(self.screen_stack) > 1 or cid not in self.col_visible:
