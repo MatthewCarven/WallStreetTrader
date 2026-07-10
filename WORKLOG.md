@@ -639,3 +639,20 @@ Committed as `7b225be`, on its own. This folds Matthew's earlier WIP "Cost / Sha
 colored Value cell) into the committed spec, since it's part of "the columns." Deliberately left
 untouched/unstaged: the other half of that WIP — the TradeDialog default-max trade quantity (empty
 box → max buy/sell) — which is unrelated to columns and stays Matthew's to commit.
+
+## 2026-07-11 — TUI: P&L % board column
+
+Matthew asked for a column showing the % profit/loss he'd realise by selling now, off the new
+Cost / Share basis. Added it as the 7th board column, "P&L %" (Ctrl+7 toggles it like the rest).
+
+Formula (`_add_row`): `(price - avg_cost) / avg_cost * 100`, sign-flipped for shorts so a falling
+price reads green (a short profits as price drops). Green/red on gain/loss, dim "·" when you hold
+nothing. Fees ignored, matching the side panel's P&L. `pnl` is precomputed into `_RowCtx` (alongside
+`chg`/`value`) so the render lambda stays a one-liner.
+
+Verified headless: drove the TUI, opened a long and a short, advanced the clock, and checked both
+cells against an independently-computed expected value (long −15.04%, short −5.63% — the short in the
+red because price rose above entry), plus the flat-asset "·" and the Ctrl+7 toggle. Full suite: 68
+pass.
+
+Committed as `349ae70`. The TradeDialog default-max-quantity WIP is still left unstaged (Matthew's).
