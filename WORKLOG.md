@@ -608,3 +608,34 @@ asset (unchanged, `keep_row=False`). New `test_selection_holds_row_across_trade`
 Committed on its own (`d1e3168`), kept separate from the pre-existing unstaged `tui.py` WIP
 (default-max trade quantity + the new "Cost / Share" column), which is left untouched for Matthew
 to commit when he's ready.
+
+
+## 2026-07-11 — TUI: configurable board columns (Ctrl+1..6 show/hide)
+
+Matthew asked what the main-screen columns are and wanted to adjust which are visible. The board
+shows six: Symbol, Price, 1D %, Pos, Value, Cost / Share (first three are market data, last three
+are your holdings in that asset). He chose per-column hotkeys — hold Ctrl and press a number to
+toggle that column — and session-only (no persistence).
+
+Confirmed the mechanics headlessly before building: Textual 0.71 routes ctrl+1..ctrl+6 bindings,
+`DataTable.clear(columns=True)` + `add_columns` rebuilds columns cleanly, and on Windows the console
+driver delivers distinct Ctrl+digit events (the usual terminal byte-collision is a Unix/ANSI issue,
+not Win32).
+
+Refactor (`tui.py`): the board is now built from a declarative `BOARD_COLUMNS` spec
+(id, header, render) instead of hard-coding cells in three places — `add_columns`, `_add_row`, and
+the movers/"next page" separator rows (a new `_separator_row` helper emits exactly one cell per
+*visible* column). `col_visible` holds state; Ctrl+1..6 call `action_toggle_column`, which flips a
+column and calls `_rebuild_board_columns` (clear + re-add columns, repaint). The highlighted asset
+is preserved across the rebuild (same care as the earlier row-selection fixes), and the last visible
+column can't be hidden so the board never goes empty. Bindings are `show=False` (kept off the
+footer) and documented in the help panel.
+
+Drove the real TUI headlessly to verify: initial six columns, single/multi toggles, restore, movers
+view + toggle (separators adapt), cursor preservation across a toggle, and the last-column guard —
+all pass.
+
+Committed as `7b225be`, on its own. This folds Matthew's earlier WIP "Cost / Share" column (and the
+colored Value cell) into the committed spec, since it's part of "the columns." Deliberately left
+untouched/unstaged: the other half of that WIP — the TradeDialog default-max trade quantity (empty
+box → max buy/sell) — which is unrelated to columns and stays Matthew's to commit.
