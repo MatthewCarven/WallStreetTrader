@@ -656,3 +656,26 @@ red because price rose above entry), plus the flat-asset "·" and the Ctrl+7 tog
 pass.
 
 Committed as `349ae70`. The TradeDialog default-max-quantity WIP is still left unstaged (Matthew's).
+
+## 2026-07-11 — TUI: live play paced at 1 sim-minute per real second
+
+Matthew found default play too fast (old "Normal" jumped ~40 sim-minutes per real second) and asked
+it to "advance a second at a time." The engine ticks in whole minutes (HOUR=60, no sub-minute unit),
+so we read that as one step per real second and confirmed the pace with him.
+
+Reworked the play clock (`_on_timer`) from "advance N ticks every 0.3s timer fire" to "advance by
+REAL elapsed wall-clock × the speed's ticks/second," accumulating fractional ticks against a
+monotonic baseline. `SPEEDS` is now ticks-per-second: 1 / 10 / 60 / 600 = 1min / 10min / 1hr / 10hr
+of sim-time per real second, default index 0 (the calm 1 min/s crawl). The 0.3s timer still drives
+the marquee scroll. A per-fire cap (elapsed clamped to 1s) stops a stall (laptop sleep, GC) from
+fast-forwarding; the baseline is dropped on pause or while a modal is up, so paused time is never
+banked and resume doesn't jump. Confirmed `s` still steps exactly one minute (Matthew asked) — it was
+already `_advance(1)`; there is no "second" to bind to.
+
+New `tests/test_tui_timing.py` drives this deterministically by rebinding only tui's `time` name to a
+shim clock (Textual/asyncio keep the real one, so their scheduling is untouched). Updated the
+real-time smoke test in `tests/test_tui.py`: it waited 0.8s at the old fast default, which no longer
+crosses the 1-tick threshold, so it now bumps to the top tier to observe the advance, then steps back
+to the default. Full suite: 69 pass.
+
+Committed as `95c244c`. The TradeDialog default-max-quantity WIP is still left unstaged (Matthew's).
