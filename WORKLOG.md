@@ -587,3 +587,24 @@ row order, then restore the cursor — by the same asset if it's still listed, e
 position. View switches (`_set_view`) now explicitly `move_cursor(row=0)` so changing class still
 starts at the top (movers still lands on row 1; new-world/load reset as before).
 `tests/test_tui_selection.py` covers it. 67 tests pass.
+
+## 2026-07-10 — TUI: keep the board row fixed when you buy or sell
+
+Matthew asked for the highlight to stay on the item when trading. Diagnosis (drove the TUI
+headlessly first): the row-selection fix above *already* restored by asset, so buying a row kept it
+selected — but holdings pin to the **top** of the board, so the cursor got yanked from (e.g.) row 6
+up to row 0, and a full sell dropped it back down the list. That jump is what reads as "it didn't
+stay put." Asked Matthew which he wanted; he picked **keep the same spot in the list** (so you can
+trade down a list without being thrown to the top).
+
+Fix (`tui.py`): `_refresh()` takes a new `keep_row` flag. On a trade we pass `keep_row=True`, which
+restores the cursor by **row position** instead of by asset — the traded asset still moves into the
+holdings block, but the cursor holds its place; the name line + chart re-sync to whatever asset is
+under the cursor after the move. Wired into both trade entry points: `_on_trade_closed` (the Enter
+dialog) and the command-line `buy`/`sell`/`short`/`cover`. Time-advance / live play still restore by
+asset (unchanged, `keep_row=False`). New `test_selection_holds_row_across_trade` in
+`tests/test_tui_selection.py`; full suite 68 pass.
+
+Committed on its own (`d1e3168`), kept separate from the pre-existing unstaged `tui.py` WIP
+(default-max trade quantity + the new "Cost / Share" column), which is left untouched for Matthew
+to commit when he's ready.
