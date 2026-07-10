@@ -31,7 +31,10 @@ from .persistence import (
     autosave_path, has_autosave, AUTOSAVE_SLOT,
 )
 
-SPEEDS = [("Slow", 1), ("Normal", 12), ("Fast", 90), ("Turbo", 600)]
+# Live-play speeds as ticks (sim-minutes) advanced per REAL second. `_on_timer` accumulates
+# wall-clock time and steps the market by the elapsed amount, so pacing is frame-rate independent.
+# Default (index 0) is a calm 1 sim-minute per real second — "a second at a time".
+SPEEDS = [("1 min/s", 1), ("10 min/s", 10), ("1 hr/s", 60), ("10 hr/s", 600)]
 SPARK = "▁▂▃▄▅▆▇█"
 BLOCKS8 = " ▁▂▃▄▅▆▇"          # 0..7 sub-cell fill for the area chart's top row
 FULL = "█"
@@ -136,7 +139,7 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
   Ctrl+1…7 show / hide a board column  (toggle)
            [dim]1 Symbol · 2 Price · 3 1D% · 4 Pos · 5 Value · 6 Cost · 7 P&L[/]
   Enter   open a buy/sell dialog for the highlighted row
-  [  ]     slower / faster   (Slow → Turbo)
+  [  ]     slower / faster   (1 min/s → 10 hr/s of sim-time per real second)
   s        step one minute      h  +1 hour      d  +1 day
   :        open the command line
   Ctrl+N   start a new world (profile/seed/cash/fees)
@@ -570,7 +573,7 @@ class TraderTUI(App):
         super().__init__()
         self.trader = trader
         self.playing = False
-        self.speed_idx = 1
+        self.speed_idx = 0                   # default live-play speed: 1 sim-minute per real second
         self.view_source: list[str] | None = None    # None => holdings + watchlist; else full candidate list
         self.view_label = "watchlist"
         self.view_page = 0
@@ -586,6 +589,8 @@ class TraderTUI(App):
         self.autosave_enabled = True
         self.resumed = False                  # set by run_tui when launched from an autosave
         self._last_autosave = 0.0
+        self._play_clock: float | None = None   # monotonic ts of the last live-play advance; None while
+        self._tick_accum = 0.0                  # paused/modal-open. accum carries fractional ticks/sec.
         self._ticker_base = ""               # cached marquee string; sliced each timer for the scroll
         self._ticker_off = 0
         notable = ["AAPL", "MSFT", "NVDA", "AMZN", "JPM", "XOM", "GOOGL", "TSLA"]
@@ -640,17 +645,33 @@ class TraderTUI(App):
     def _on_timer(self) -> None:
         # While a modal (Help / Trade / New-world) is up it owns the screen, so the base-screen
         # widgets (#ticker/#board/...) aren't queryable -- and the market effectively pauses.
+        # Drop the play baseline so no real time is banked across the modal (or a pause).
         if len(self.screen_stack) > 1:
+            self._play_clock = None
             return
         self._tick_ticker()                  # scroll the marquee even while paused
         if not self.playing:
+            self._play_clock = None
             return
-        events, closures = self.trader._advance(SPEEDS[self.speed_idx][1])
+        # Advance the market by REAL elapsed time * the speed's ticks/second, so play runs at a
+        # steady wall-clock pace (default 1 sim-minute per real second) regardless of timer jitter.
+        now = time.monotonic()
+        if self._play_clock is None:         # just (re)started playing -- set the baseline, no jump
+            self._play_clock = now
+            self._tick_accum = 0.0
+            return
+        elapsed = min(now - self._play_clock, 1.0)   # cap a single step so a stall (sleep/GC) can't fast-forward
+        self._play_clock = now
+        self._tick_accum += elapsed * SPEEDS[self.speed_idx][1]
+        steps = int(self._tick_accum)
+        if steps <= 0:                       # not a whole sim-minute yet; wait for more real time
+            return
+        self._tick_accum -= steps
+        events, closures = self.trader._advance(steps)
         self._log_events(events)
         self._log_closures(closures)
         self._refresh()
         if self.autosave_enabled:
-            now = time.monotonic()
             if now - self._last_autosave >= AUTOSAVE_SECS:
                 self._autosave()
                 self._last_autosave = now

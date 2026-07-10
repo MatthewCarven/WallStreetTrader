@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from textual.widgets import Input, DataTable  # noqa: E402
-from trader_pro.tui import TraderTUI, TradeDialog  # noqa: E402
+from trader_pro.tui import TraderTUI, TradeDialog, SPEEDS  # noqa: E402
 from trader_pro.cli import TraderApp  # noqa: E402
 from trader_pro.core import load_seed_universe, World  # noqa: E402
 
@@ -35,13 +35,20 @@ async def _scenario() -> None:
         await pilot.pause()
         assert "CRYPTO:BTR" in app.trader.world.portfolio.positions
 
-        # Space plays; clock advances
+        # Space plays; the clock advances. The default pace is a deliberate 1 sim-minute per real
+        # second, so bump to the fastest tier to see movement within a short real-time window, then
+        # step back down to the default so the speed-control check below starts from a known index.
+        for _ in range(len(SPEEDS) - 1):
+            await pilot.press("right_square_bracket")   # -> fastest
         t0 = app.trader.world.market.tick_index
         await pilot.press("space")
         assert app.playing
         await pilot.pause(0.8)
         assert app.trader.world.market.tick_index > t0
         await pilot.press("space")  # pause
+        for _ in range(len(SPEEDS) - 1):
+            await pilot.press("left_square_bracket")    # back to the default (slowest)
+        assert app.speed_idx == 0
 
         # number keys switch board views
         await pilot.press("1"); assert app.view_label == "crypto"
