@@ -242,16 +242,24 @@ class TradeDialog(ModalScreen):
             return
         w = self.app.trader.world
         pos = w.portfolio.positions.get(self.aid)
+        price = w.price(self.aid)
         token = self.query_one("#qty", Input).value.strip()
-        if not token:                      # empty box: do nothing (no accidental orders)
-            self._msg("enter a quantity first (e.g. 10, $500, or all)", "yellow")
-            return
-        if verb == "sell" and token.lower() == "all":
-            qty = pos.quantity if pos and pos.quantity > 0 else 0.0
-        elif verb == "cover" and token.lower() == "all":
-            qty = -pos.quantity if pos and pos.quantity < 0 else 0.0
+        if not token:  # Empty quantity: default to max buy/sell
+            if verb in ("buy", "short"):
+                qty = w.portfolio.buying_power(w.price_of) / price
+            elif verb == "sell":
+                qty = pos.quantity if pos and pos.quantity > 0 else 0.0
+            elif verb == "cover":
+                qty = -pos.quantity if pos and pos.quantity < 0 else 0.0
+            else:
+                qty = 0.0
         else:
-            qty = self._amount(token)
+            if verb == "sell" and token.lower() == "all":
+                qty = pos.quantity if pos and pos.quantity > 0 else 0.0
+            elif verb == "cover" and token.lower() == "all":
+                qty = -pos.quantity if pos and pos.quantity < 0 else 0.0
+            else:
+                qty = self._amount(token)
         if not qty or qty <= 0:
             self._msg("enter a valid quantity", "yellow"); return
         side = OrderSide.BUY if verb in ("buy", "cover") else OrderSide.SELL
