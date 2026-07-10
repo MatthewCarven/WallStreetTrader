@@ -788,7 +788,7 @@ class TraderTUI(App):
             key=aid,
         )
 
-    def _refresh(self) -> None:
+    def _refresh(self, keep_row: bool = False) -> None:
         w = self.trader.world
         pf = w.portfolio
         po = w.price_of
@@ -833,8 +833,13 @@ class TraderTUI(App):
                 table.add_row(Text("→ " + next_label, style="bold cyan"),
                               Text(""), Text(""), Text(""), Text(""), key="__next__")
                 row_keys.append("__next__")
-        # Restore the highlight: by the same asset if it's still listed, else by position.
-        if prev_key is not None and prev_key in row_keys:
+        # Restore the highlight. By default we re-find the same *asset*, so advancing time or
+        # live play doesn't snap the cursor around. After a trade (`keep_row`) we instead hold
+        # the same *row*: buying pins the asset into the holdings block at the top, and we don't
+        # want that to yank the highlight up to row 0 -- you keep your place in the list.
+        if keep_row and row_keys:
+            target = min(prev_row, len(row_keys) - 1)
+        elif prev_key is not None and prev_key in row_keys:
             target = row_keys.index(prev_key)
         elif row_keys:
             target = min(prev_row, len(row_keys) - 1)
@@ -845,6 +850,14 @@ class TraderTUI(App):
                 table.move_cursor(row=target)
             except Exception:
                 pass
+        # After a trade the row we land on is usually a *different* asset than the one we traded
+        # (the traded asset jumped into the holdings block), so re-sync the name line + chart to
+        # whatever is under the cursor now.
+        if keep_row and target >= 0:
+            landed = row_keys[target]
+            self.cursor_aid = landed if w.has_asset(landed) else None
+            self._render_status()
+            self._render_chart()
 
         port = Text()
         if not pf.positions:
@@ -1098,7 +1111,7 @@ class TraderTUI(App):
             fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
             self._log(Text(f"{verb} {qty:g} {sym} @ {money(res.price)}{fee_txt} "
                            f"(P&L {res.realized_pnl:+,.2f})", style="green"))
-        self._refresh()
+        self._refresh(keep_row=result is not None)
 
     # ---- view switching ---- #
 
@@ -1214,7 +1227,7 @@ class TraderTUI(App):
 
         # everything else -> core logic, short confirmation to the log
         self._log_ansi(self.trader.execute(line))
-        self._refresh()
+        self._refresh(keep_row=cmd in ("buy", "sell", "short", "cover"))
 
 
 def textual_version_ok() -> tuple[bool, str]:

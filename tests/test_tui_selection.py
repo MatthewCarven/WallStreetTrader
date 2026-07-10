@@ -1,5 +1,6 @@
 """The board keeps its highlighted row when time advances (s/h/d) or the clock runs live,
-but a view switch still starts at the top."""
+but a view switch still starts at the top. A trade also holds the row: buying pins the asset
+into the holdings block at the top, and we don't want that to yank the cursor up to row 0."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from textual.widgets import DataTable  # noqa: E402
+from textual.widgets import DataTable, Input  # noqa: E402
 from trader_pro.tui import TraderTUI  # noqa: E402
 from trader_pro.cli import TraderApp  # noqa: E402
 from trader_pro.core import load_seed_universe, World  # noqa: E402
@@ -62,6 +63,47 @@ def test_selection_persists_across_time() -> None:
     asyncio.run(_scenario())
 
 
+async def _trade_scenario() -> None:
+    app = TraderTUI(TraderApp(
+        World.new(U, 20260614, profile="Normal", starting_cash=200_000.0), universe=U))
+    app.saves_dir = Path(tempfile.mkdtemp())
+    async with app.run_test(size=(120, 40)) as pilot:
+        board = app.query_one("#board", DataTable)
+        board.focus()
+        await pilot.press("2")            # stocks view (unowned candidates)
+        await pilot.pause()
+        for _ in range(6):
+            await pilot.press("down")
+        await pilot.pause()
+        row = board.cursor_row
+        bought = _key_at(board, row)
+        assert row == 6
+
+        # buy the highlighted row through the dialog
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app.screen_stack) == 2, "dialog did not open"
+        app.screen.query_one("#qty", Input).value = "$500"
+        await pilot.pause()
+        await pilot.press("enter")        # submit buy -> dialog dismisses, app refreshes
+        await pilot.pause()
+        await pilot.pause()
+        assert len(app.screen_stack) == 1, "dialog did not close"
+
+        # the buy filled and the asset is now a holding (which pins it to the top)...
+        assert bought in app.trader.world.portfolio.positions, "buy did not fill"
+        # ...but the cursor holds its ROW instead of being yanked up to row 0,
+        assert board.cursor_row == row, "trade moved the cursor row"
+        # and the name line / chart follow whatever asset is under the cursor now.
+        assert app.cursor_aid == _key_at(board, board.cursor_row)
+
+
+def test_selection_holds_row_across_trade() -> None:
+    asyncio.run(_trade_scenario())
+
+
 if __name__ == "__main__":
     test_selection_persists_across_time()
     print("ok  test_selection_persists_across_time")
+    test_selection_holds_row_across_trade()
+    print("ok  test_selection_holds_row_across_trade")
