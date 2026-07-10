@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections import namedtuple
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -132,6 +133,8 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
   5        top movers (biggest gainers & losers, whole market)
   o        sort the board by 1D %  (toggle)
   c        cycle the chart range   (1H → 1D → 3D → 1W)
+  Ctrl+1…6 show / hide a board column  (toggle)
+           [dim]1 Symbol · 2 Price · 3 1D% · 4 Pos · 5 Value · 6 Cost[/]
   Enter   open a buy/sell dialog for the highlighted row
   [  ]     slower / faster   (Slow → Turbo)
   s        step one minute      h  +1 hour      d  +1 day
@@ -485,6 +488,31 @@ class LoadScreen(ModalScreen):
         self.dismiss(None)
 
 
+# ---- market board columns ---- #
+# The board is built from this spec so columns can be shown/hidden at runtime. Ctrl+1..Ctrl+6
+# map to the six ids below, in this order. Each entry is (id, header, render), where `render`
+# turns a per-row context (`_RowCtx`) into that column's cell. Keep the list, the Ctrl+N
+# bindings, and the Ctrl+N help line in sync if you add or reorder columns.
+_RowCtx = namedtuple("_RowCtx", "sym price chg qty value cost")
+
+BOARD_COLUMNS = [
+    ("symbol", "Symbol",
+        lambda c: Text(c.sym, style="bold")),
+    ("price", "Price",
+        lambda c: Text(money(c.price), justify="right")),
+    ("chg", "1D %",
+        lambda c: Text(f"{c.chg:+.2f}%", style="green" if c.chg >= 0 else "red", justify="right")),
+    ("pos", "Pos",
+        lambda c: Text(f"{c.qty:g}" if c.qty else "·", justify="right",
+                       style="yellow" if c.qty < 0 else ("white" if c.qty else "dim"))),
+    ("value", "Value",
+        lambda c: Text(money(c.value) if c.value else "·", justify="right",
+                       style="green" if c.value > 0 else ("red" if c.value < 0 else "dim"))),
+    ("cost", "Cost / Share",
+        lambda c: Text(money(c.cost) if c.cost else "·", justify="right", style="dim")),
+]
+
+
 class TraderTUI(App):
     CSS = f"""
     Screen {{ layout: vertical; background: #07120b; }}
@@ -517,6 +545,14 @@ class TraderTUI(App):
         ("5", "view_movers", "Movers"),
         ("o", "toggle_sort", "Sort %"),
         ("c", "chart_range", "Chart range"),
+        # Ctrl+1..Ctrl+6 show/hide the six board columns (kept off the footer to avoid clutter;
+        # documented in the help panel). Ids/order must match BOARD_COLUMNS.
+        Binding("ctrl+1", "toggle_column('symbol')", "Col Symbol", show=False),
+        Binding("ctrl+2", "toggle_column('price')", "Col Price", show=False),
+        Binding("ctrl+3", "toggle_column('chg')", "Col 1D%", show=False),
+        Binding("ctrl+4", "toggle_column('pos')", "Col Pos", show=False),
+        Binding("ctrl+5", "toggle_column('value')", "Col Value", show=False),
+        Binding("ctrl+6", "toggle_column('cost')", "Col Cost", show=False),
         ("question_mark", "help", "Help"),
         ("q", "quit", "Quit"),
         Binding("ctrl+c", "force_quit", "Quit", priority=True),
@@ -538,6 +574,7 @@ class TraderTUI(App):
         self.owned_only = False
         self.movers = False                  # movers view (top gainers/losers across the market)
         self.sort_by_change = False          # sort the board by 1D % instead of natural order
+        self.col_visible = {cid: True for cid, _, _ in BOARD_COLUMNS}  # board columns shown (Ctrl+1..6)
         self.chart_range = 1                 # index into CHART_RANGES (default 1D)
         self.cursor_aid: str | None = None    # asset highlighted on the board (for the name line + chart)
         self.slot: str | None = None          # current manual save slot (Ctrl+S default)
@@ -574,7 +611,7 @@ class TraderTUI(App):
         self.title = "TRADER PRO"
         self.sub_title = "◆ retro market terminal"
         table = self.query_one("#board", DataTable)
-        table.add_columns("Symbol", "Price", "1D %", "Pos", "Value")
+        table.add_columns(*[header for _, header, _ in self._visible_columns()])
         table.border_title = "MARKET · watchlist"
         self.query_one("#log", RichLog).border_title = "news & log"
         self.query_one("#equity", Static).border_title = "net worth"
@@ -769,6 +806,24 @@ class TraderTUI(App):
         out.append(f"hi ${hi:,.0f} lo ${lo:,.0f}", style="dim")
         panel.update(out)
 
+    def _visible_columns(self) -> list[tuple]:
+        """The BOARD_COLUMNS currently shown, in fixed left-to-right order."""
+        return [c for c in BOARD_COLUMNS if self.col_visible.get(c[0], True)]
+
+    def _separator_row(self, table: DataTable, label: Text, key: str, *, hint_1d: bool = False) -> None:
+        """A banner / pager row (movers headers, the 'Next page' row). Emits exactly one cell per
+        *visible* column: the label in the first, blanks in the rest -- except the 1D% column keeps
+        a dim '1D %' hint on the gainers header. Adapts as columns are toggled on/off."""
+        cells: list[Text] = []
+        for cid, _, _ in self._visible_columns():
+            if not cells:
+                cells.append(label)
+            elif hint_1d and cid == "chg":
+                cells.append(Text("1D %", style="dim", justify="right"))
+            else:
+                cells.append(Text(""))
+        table.add_row(*cells, key=key)
+
     def _add_row(self, table: DataTable, aid: str) -> None:
         w, eng = self.trader.world, self.trader.engine
         pf = w.portfolio
@@ -778,15 +833,9 @@ class TraderTUI(App):
         chg = (price / prev - 1) * 100 if prev > 0 else 0.0
         pos = pf.positions.get(aid)
         qty = pos.quantity if pos else 0.0
-        table.add_row(
-            Text(aid.split(":", 1)[1], style="bold"),
-            Text(money(price), justify="right"),
-            Text(f"{chg:+.2f}%", style="green" if chg >= 0 else "red", justify="right"),
-            Text(f"{qty:g}" if qty else "·", justify="right",
-                 style="yellow" if qty < 0 else ("white" if qty else "dim")),
-            Text(money(qty * price) if qty else "", justify="right"),
-            key=aid,
-        )
+        ctx = _RowCtx(aid.split(":", 1)[1], price, chg, qty, qty * price,
+                      pos.avg_cost if pos else 0.0)
+        table.add_row(*[render(ctx) for _, _, render in self._visible_columns()], key=aid)
 
     def _refresh(self, keep_row: bool = False) -> None:
         w = self.trader.world
@@ -812,14 +861,11 @@ class TraderTUI(App):
         if self.movers:
             table.border_title = "MARKET · movers"
             gainers, losers = self._movers(10)
-            table.add_row(Text("▲ TOP GAINERS", style="bold green"),
-                          Text(""), Text("1D %", style="dim", justify="right"), Text(""), Text(""),
-                          key="__hdr_g__")
+            self._separator_row(table, Text("▲ TOP GAINERS", style="bold green"), "__hdr_g__", hint_1d=True)
             row_keys.append("__hdr_g__")
             for _, aid in gainers:
                 self._add_row(table, aid); row_keys.append(aid)
-            table.add_row(Text("▼ TOP LOSERS", style="bold red"),
-                          Text(""), Text(""), Text(""), Text(""), key="__hdr_l__")
+            self._separator_row(table, Text("▼ TOP LOSERS", style="bold red"), "__hdr_l__")
             row_keys.append("__hdr_l__")
             for _, aid in losers:
                 self._add_row(table, aid); row_keys.append(aid)
@@ -830,8 +876,7 @@ class TraderTUI(App):
             for aid in ids:
                 self._add_row(table, aid); row_keys.append(aid)
             if next_label:
-                table.add_row(Text("→ " + next_label, style="bold cyan"),
-                              Text(""), Text(""), Text(""), Text(""), key="__next__")
+                self._separator_row(table, Text("→ " + next_label, style="bold cyan"), "__next__")
                 row_keys.append("__next__")
         # Restore the highlight. By default we re-find the same *asset*, so advancing time or
         # live play doesn't snap the cursor around. After a trade (`keep_row`) we instead hold
@@ -1003,6 +1048,41 @@ class TraderTUI(App):
     def action_chart_range(self) -> None:
         self.chart_range = (self.chart_range + 1) % len(CHART_RANGES)
         self._render_chart()
+
+    def action_toggle_column(self, cid: str) -> None:
+        """Show/hide a board column (Ctrl+1..Ctrl+6). Session-only -- resets to all-on next launch.
+        Refuses to hide the last remaining column so the board never ends up with zero columns."""
+        # A modal owns the screen while it's open (the board isn't queryable) -- ignore the key.
+        if len(self.screen_stack) > 1 or cid not in self.col_visible:
+            return
+        header = next(h for i, h, _ in BOARD_COLUMNS if i == cid)
+        if self.col_visible[cid] and sum(self.col_visible.values()) == 1:
+            self._log(Text(f"can't hide '{header}' — it's the last visible column", style="yellow"))
+            return
+        self.col_visible[cid] = not self.col_visible[cid]
+        self._rebuild_board_columns()
+        self._log(Text(f"column '{header}' " + ("shown" if self.col_visible[cid] else "hidden"),
+                       style="cyan"))
+
+    def _rebuild_board_columns(self) -> None:
+        """Re-create the board's columns from `col_visible` and repaint. A DataTable can't hide a
+        column in place, so we drop columns+rows and rebuild; _refresh re-adds the rows. We hold the
+        highlighted asset across the rebuild (consistent with how trades/time-advance keep the row)."""
+        table = self.query_one("#board", DataTable)
+        prev_key = None
+        if table.row_count:
+            try:
+                prev_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+            except Exception:
+                prev_key = None
+        table.clear(columns=True)
+        table.add_columns(*[header for _, header, _ in self._visible_columns()])
+        self._refresh()
+        if prev_key is not None:
+            try:
+                table.move_cursor(row=table.get_row_index(prev_key))
+            except Exception:
+                pass
 
     def action_toggle_sort(self) -> None:
         self.sort_by_change = not self.sort_by_change
