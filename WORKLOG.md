@@ -798,6 +798,46 @@ colour, splitter layout and board cell colours all render right). Full suite: 82
 
 Committed as `2c33e3e`. Next: slice 5 (net-worth equity curve + asset-detail fundamentals panel).
 
+## 2026-07-11 — GUI (V2): Slice 5 — equity curve + asset detail
+
+Rounded out the read-only dashboard's right column (which now reads top-to-bottom: net-worth curve,
+price chart, asset detail). The equity curve plots `pf.nw_history` — green above starting cash, red
+below, titled "net worth $X (+Y%)" — and updates each tick/advance. Below the price chart, a detail
+panel shows the highlighted asset's fundamentals from `world.meta_of(aid)` via the pure
+`model.asset_detail_html`, with kind-specific fields: stock → sector/industry/growth/volatility/cap;
+bond → issuer/rating/coupon/maturity/yield; crypto → archetype/fair-value/volatility/anchor/supply.
+
+Verified with a pure per-kind `asset_detail_html` test + equity/detail assertions in the offscreen
+smoke, and a content dump: Agilent (Health Care stock), a AAA 1Y government bond (3.83% coupon), and
+Bitron (store-of-value crypto, 65% vol) all render the right fields. The equity curve is flat at
+$5,000 until there are positions — net worth only moves with P&L — so it gains shape once trading
+lands. Full suite: 83 pass.
+
+Committed as `27d5bcf`. That completes the read-only dashboard (board · interaction · chart · equity ·
+detail). Next: slice 6 (the trade dialog — first point the GUI is actually playable).
+
+## 2026-07-11 — GUI (V2): Slice 6 — trade dialog (buy/sell/short/cover), playable
+
+The GUI is now playable end-to-end. A modal `TradeDialog` — opened with Enter, a double-click on a
+row, or the Trade button — buys / sells / shorts / covers the highlighted asset through
+`execute_order`. The quantity parsing (empty ⇒ max buying-power/whole-position, `all`, `$amount`,
+plain number) is lifted into the pure `model.trade_quantity`, a faithful port of the TUI's `_act`, so
+it's unit-tested without Qt. On a fill the dialog closes and `_on_filled` re-pins holdings, refreshes
+header/chart/equity/detail and flashes the fill (price, fee, realized P&L) in the status bar; a
+rejected order (insufficient buying power, etc.) shows `res.message` and stays open.
+
+Important detail carried over from the TUI: the market **freezes while the dialog is open** — the
+QTimer is stopped for the duration and the play baseline dropped on resume — so the price quoted in
+the dialog is exactly the fill price, and no wall-clock time is banked behind the modal.
+
+Verified with a pure `trade_quantity` test, a buy/reject/sell cycle in the offscreen smoke, and a live
+run: bought $2k of BTR (0.0246 units, cash $5k→$3k), held 4 days as it fell to ~$69k, sold all →
+realized −$300.74 (exactly qty × the drop), cash back to $4,699, position closed, net worth tracking
+the holding throughout. Full suite: 84 pass.
+
+Committed as `145b4b9`. Next: slice 7 (positions & margin health — the positions table plus the
+blue→red margin meter and margin-call popup Matthew asked for).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
