@@ -1,0 +1,71 @@
+"""Offscreen smoke test for the GUI shell (Slice 0).
+
+Runs the Qt work in a SUBPROCESS on purpose. Importing PySide6 (shiboken) installs a global
+import hook that, on Python 3.14, collides with Textual's lazy-module machinery when both are
+imported into a single interpreter (shiboken introspects each new import via `inspect`, and
+`textual.widgets.__getattr__` raises ImportError on the `__wrapped__` probe). The GUI and the
+Textual TUI never share a process in real use, so we keep PySide6 out of the main pytest
+interpreter and exercise the window headlessly in a child process instead. Skipped if PySide6
+isn't installed. The pure logic lives in test_gui_model.py (no Qt needed).
+"""
+import importlib.util
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+if importlib.util.find_spec("PySide6") is None:
+    pytest.skip("PySide6 not installed", allow_module_level=True)
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+_SMOKE = textwrap.dedent(
+    """
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    from trader_pro.cli import TraderApp, fmt_clock
+    from trader_pro.core import World, load_seed_universe
+    from trader_pro.gui.app import TraderGUI
+
+    app = QApplication.instance() or QApplication([])
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    gui = TraderGUI(TraderApp(world, universe=uni))
+    gui.autosave_enabled = False              # don't write into saves/ during tests
+
+    # header builds and shows the live clock
+    text = gui.header_label.text()
+    assert "TRADER PRO" in text, text
+    assert fmt_clock(gui.trader.world.market.tick_index) in text, text
+
+    # advancing the market updates the header
+    before = gui.header_label.text()
+    gui.trader._advance(60)                    # +1 sim-hour
+    gui._refresh_header()
+    after = gui.header_label.text()
+    assert before != after
+    assert fmt_clock(gui.trader.world.market.tick_index) in after
+
+    # play/pause toggles cleanly
+    assert gui.playing is False
+    gui.toggle_play()
+    assert gui.playing is True and "playing" in gui.state_label.text()
+    gui.toggle_play()
+    assert gui.playing is False
+
+    print("SMOKE OK")
+    """
+)
+
+
+def test_gui_shell_smoke_in_subprocess():
+    proc = subprocess.run(
+        [sys.executable, "-c", _SMOKE],
+        capture_output=True, text=True, timeout=120, cwd=str(REPO_ROOT),
+    )
+    detail = f"\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+    assert proc.returncode == 0, detail
+    assert "SMOKE OK" in proc.stdout, detail

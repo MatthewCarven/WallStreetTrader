@@ -9,3 +9,7 @@
 textual>=0.50,<0.72   # the live TUI front-end:  python play_tui.py
 matplotlib>=3.7    # validation / comparison charts in scripts/
 cairosvg>=2.7      # only to rasterise TUI screenshots (dev convenience)
+
+# The desktop GUI front-end (V2):  python play_gui.py
+PySide6>=6.6       # Qt for Python (LGPL). Stable-ABI (abi3) wheels install on 3.10+ incl. 3.14.
+pyqtgraph>=0.13    # fast real-time price / equity charts (pulls in numpy)
