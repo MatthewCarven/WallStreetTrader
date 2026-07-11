@@ -860,6 +860,25 @@ Full suite: 86 pass.
 Committed as `0e67757`. **Slice 7 is half done** — next session: the positions table (signed qty /
 avg cost / value / unrealized P&L / P&L %) + a portfolio summary line, then slices 8–10.
 
+## 2026-07-12 — GUI (V2): Slice 7 (second half) — positions table + summary
+
+Finished slice 7. A positions table now sits under the board in a vertical `QSplitter` (board ~3 :
+positions ~1). `PositionsModel` reads the pure `model.position_rows` and shows Symbol, signed Qty
+(amber for shorts), Avg Cost, Value, unrealized P&L ($) and P&L % — green/red by sign — refreshing
+each tick/trade. Above it a summary line: position count, total unrealized P&L, and the
+maintenance-margin **headroom** (`maintenance_excess`), which pairs with the meter from the first
+half. `refresh()` only resets the model when the set of held assets changes (open/close), otherwise it
+repaints values in place, so live P&L updates don't flicker or drop selection.
+
+Verified with a pure `position_rows` test (value = qty·price, pnl ≈ 0 right after a buy) and a
+positions check in the offscreen smoke, plus a live long+short dump: a BTR long (−17.46%) and an A
+short (−12.29 sh, amber, −6.62% as the stock rose against it), summary unrealized −623.28 = sum of the
+two, margin headroom $8,357.86. Both signs and the short's negative value/qty render correctly. Full
+suite: 87 pass.
+
+Committed as `a948f19`. **Slice 7 done** (margin meter + popup + positions table + summary). Next:
+slice 8 (news/event feed + scrolling ticker tape + top-movers view).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
