@@ -16,10 +16,11 @@ import time
 
 import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QKeySequence
+from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QDialog, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMainWindow, QPushButton, QSplitter, QTableView, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSplitter, QTableView,
+    QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
@@ -29,8 +30,36 @@ from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI, PANEL,
     RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell, default_watchlist, header_html,
-    kind_ids, row_ctx, steps_for, trade_quantity, visible_ids,
+    kind_ids, margin_call_message, margin_color, margin_fill, row_ctx, steps_for,
+    trade_quantity, visible_ids,
 )
+
+
+class MarginMeter(QWidget):
+    """A compact [▮▮▮░░] margin-risk gauge — blue (all cash) → amber (buying power gone) → red
+    (margin-call line). Set the level with set_fill(0..1). (Matthew's requested indicator.)"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._fill = 0.0
+        self.setFixedSize(150, 18)
+
+    def set_fill(self, fill: float) -> None:
+        fill = max(0.0, min(1.0, fill))
+        if fill != self._fill:
+            self._fill = fill
+            self.update()
+
+    def paintEvent(self, event) -> None:   # noqa: N802 — Qt override
+        p = QPainter(self)
+        w, h, pad = self.width(), self.height(), 2
+        p.fillRect(0, 0, w, h, QColor(BG))                       # empty track
+        fw = int((w - 2 * pad) * self._fill)
+        if fw > 0:
+            p.fillRect(pad, pad, fw, h - 2 * pad, QColor(*margin_color(self._fill)))
+        p.setPen(QColor(DIM))                                    # bracket border
+        p.drawRect(0, 0, w - 1, h - 1)
+        p.end()
 
 
 class BoardView(QTableView):
@@ -218,6 +247,7 @@ class TraderGUI(QMainWindow):
         self.chart_range = 1                        # index into CHART_RANGES (default 1D)
         self._curve = None                          # created in _build_ui; guards early refresh
         self._equity_curve = None
+        self.margin_meter = None
 
         self.setWindowTitle("TRADER PRO")
         self.resize(1120, 720)
@@ -290,6 +320,14 @@ class TraderGUI(QMainWindow):
         controls.addWidget(self.day_btn)
 
         controls.addStretch(1)
+        margin_cap = QLabel("margin")
+        margin_cap.setFont(mono)
+        controls.addWidget(margin_cap)
+        self.margin_meter = MarginMeter()
+        self.margin_meter.setToolTip(
+            "Margin risk — blue: all cash · amber: buying power gone · red: margin call")
+        controls.addWidget(self.margin_meter)
+        controls.addSpacing(16)
         self.state_label = QLabel("paused")
         self.state_label.setFont(mono)
         controls.addWidget(self.state_label)
@@ -496,11 +534,13 @@ class TraderGUI(QMainWindow):
         """A discrete manual advance (Step / +1h / +1d) — jumps the market immediately, whether
         playing or paused, and never banks against the play clock. Mirrors the TUI's
         action_step/hour/day. Cheap even for +1d: the engine evaluates seeded anchors directly."""
-        self.trader._advance(ticks)             # events/closures surface in the news slice (8)
+        _events, closures = self.trader._advance(ticks)   # events feed lands in slice 8
         self._refresh_header()
         self._refresh_board()
         self._refresh_chart()
         self._refresh_equity()
+        if closures:
+            self._notify_margin_call(closures)
 
     def _on_timer(self) -> None:
         if not self.playing:
@@ -516,7 +556,7 @@ class TraderGUI(QMainWindow):
         steps, self._tick_accum = steps_for(elapsed, SPEEDS[self.speed_idx][1], self._tick_accum)
         if steps <= 0:                          # not a whole sim-minute yet; wait for more time
             return
-        self.trader._advance(steps)             # events/closures surface in the news slice (8)
+        _events, closures = self.trader._advance(steps)   # events feed lands in slice 8
         self._refresh_header()
         self._refresh_board()
         self._refresh_chart()
@@ -524,9 +564,13 @@ class TraderGUI(QMainWindow):
         if self.autosave_enabled and now - self._last_autosave >= AUTOSAVE_SECS:
             self._autosave()
             self._last_autosave = now
+        if closures:
+            self._notify_margin_call(closures)
 
     def _refresh_header(self) -> None:
         self.header_label.setText(header_html(self.trader.world))
+        if self.margin_meter is not None:
+            self.margin_meter.set_fill(margin_fill(self.trader.world))
 
     def _refresh_board(self) -> None:
         self.board_model.refresh()
@@ -700,6 +744,11 @@ class TraderGUI(QMainWindow):
         if res.realized_pnl:
             extra += f"   realized {money(res.realized_pnl)}"
         self.statusBar().showMessage(f"{verb} {qty:g} {sym} @ {money(res.price)}{extra}", 6000)
+
+    def _notify_margin_call(self, closures) -> None:
+        if self.playing:                            # a margin call is a stop-and-look moment
+            self.toggle_play()
+        QMessageBox.warning(self, "⚠  Margin Call", margin_call_message(closures))
 
     # ---- persistence ---- #
 

@@ -168,6 +168,17 @@ _SMOKE = textwrap.dedent(
     left = gui.trader.world.portfolio.positions.get(aid)
     assert left is None or abs(left.quantity) < 1e-9
 
+    # --- Slice 7 (half): margin-risk meter ---
+    from trader_pro.gui.model import margin_fill
+    assert gui.margin_meter is not None
+    gui._refresh_header()                                  # sync meter to current (flat) state
+    assert gui.margin_meter._fill == 0.0                   # nothing held => empty
+    dlgm = TradeDialog(gui.trader, aid); dlgm.qty.setText(""); dlgm._act("buy")   # max buy (~2x)
+    assert dlgm.fill is not None
+    gui._on_filled(*dlgm.fill)
+    assert margin_fill(gui.trader.world) > 0.0             # leverage lifts the meter off zero
+    assert 0.0 <= gui.margin_meter._fill <= 1.0
+
     print("SMOKE OK")
     """
 )

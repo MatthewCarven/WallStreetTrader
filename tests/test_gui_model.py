@@ -153,3 +153,21 @@ def test_trade_quantity_parsing():
     assert trade_quantity(world, aid, "sell", "") == 0.0                      # nothing held
     assert trade_quantity(world, aid, "sell", "all") == 0.0
     assert trade_quantity(world, aid, "buy", "abc") == 0.0                    # garbage => 0
+
+
+def test_margin_fill_and_color():
+    from trader_pro.gui.model import margin_fill, margin_color
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    assert margin_fill(world) == 0.0                       # all cash, nothing held => empty
+    assert margin_color(0.0)[2] > margin_color(0.0)[0]     # bluer than red at empty
+    assert margin_color(1.0)[0] > margin_color(1.0)[2]     # redder than blue at full
+
+
+def test_margin_call_message():
+    from trader_pro.core import ExecutionResult, Order, OrderSide
+    from trader_pro.gui.model import margin_call_message
+    res = ExecutionResult(True, Order("CRYPTO:BTR", OrderSide.SELL, 0.5),
+                          price=60000.0, realized_pnl=-1234.0, message="margin liquidation")
+    msg = margin_call_message([res])
+    assert "BTR" in msg and "0.5" in msg and "liquidat" in msg.lower()

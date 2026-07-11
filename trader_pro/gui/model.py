@@ -11,6 +11,7 @@ from collections import namedtuple
 from ..cli import TraderApp, fmt_clock, money
 from ..core import AssetKind, World, load_seed_universe
 from ..core.engine import DAY, HOUR, WEEK
+from ..core.portfolio import MAINTENANCE_MARGIN_RATIO
 from ..persistence import autosave_path, has_autosave, load_game
 
 # Live-play speeds as ticks (sim-minutes) advanced per REAL second — mirrors tui.py SPEEDS.
@@ -313,3 +314,35 @@ def trade_quantity(world, aid: str, verb: str, token: str) -> float:
         return float(tok[1:]) / price if tok.startswith("$") else float(tok)
     except ValueError:
         return 0.0
+
+
+def margin_fill(world) -> float:
+    """Margin-risk meter level in [0,1] = MAINTENANCE_MARGIN_RATIO * gross_exposure / equity,
+    clamped. 0 = all cash (safe); ~0.5 = buying power exhausted (gross = 2x equity); 1 = the
+    margin-call line (gross = 4x equity, maintenance_excess <= 0)."""
+    pf = world.portfolio
+    po = world.price_of
+    equity = pf.equity(po)
+    if equity <= 0:
+        return 1.0
+    return max(0.0, min(1.0, MAINTENANCE_MARGIN_RATIO * pf.gross_exposure(po) / equity))
+
+
+def margin_color(fill: float) -> tuple:
+    """Meter colour by fill: blue (safe/empty) -> amber (~half, buying power gone) -> red (full,
+    margin call). Returns an (r, g, b) tuple."""
+    fill = max(0.0, min(1.0, fill))
+    blue, amber, red = (59, 130, 246), (255, 176, 0), (229, 72, 77)
+    if fill <= 0.5:
+        a, b, t = blue, amber, fill / 0.5
+    else:
+        a, b, t = amber, red, (fill - 0.5) / 0.5
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def margin_call_message(closures) -> str:
+    """Readable summary of forced margin liquidations (liquidate_for_margin results) for the popup."""
+    lines = [f"• force-sold {c.order.quantity:g} {c.order.asset_id.split(':', 1)[1]} "
+             f"@ {money(c.price)}   (P&L {c.realized_pnl:+,.2f})" for c in closures]
+    return ("The market moved against your leverage. To restore your maintenance margin the broker "
+            "liquidated:\n\n" + "\n".join(lines))
