@@ -879,6 +879,29 @@ suite: 87 pass.
 Committed as `a948f19`. **Slice 7 done** (margin meter + popup + positions table + summary). Next:
 slice 8 (news/event feed + scrolling ticker tape + top-movers view).
 
+## 2026-07-12 — GUI (V2): Slice 8 — news feed, ticker tape, top-movers
+
+The market's running story. Three pieces, all fed by pure helpers so the logic tests without Qt:
+
+- **News feed** — a `QListWidget` (newest on top, capped at 200) that logs the seeded events fired on
+  each `_advance` plus any forced margin liquidations, coloured green/red by direction
+  (`model.event_entry` / `closure_entry`). `_advance`'s events were previously discarded; now they
+  surface here.
+- **Ticker tape** — an amber marquee under the header (`model.ticker_text`: watchlist symbol · price ·
+  1D% arrow), scrolled one character per 250 ms timer tick — and it scrolls even while paused, since
+  `_scroll_ticker` runs before the play-state check in `_on_timer`.
+- **Top-movers** — a board mode (key 5 / Movers button) showing the top-12 1D% gainers then losers
+  across the whole market (`model.movers_ids`), wired through `_rebuild_board` alongside the normal
+  views.
+
+Verified: pure tests (movers dedup, ticker arrows, event/closure colour) + smoke assertions, and a
+live 15-day Volatile run — 83 events logged with real headlines ("Verisk Analytics surges on a blowout
+earnings beat"), a populated ticker, and a 24-row movers board (LNR +50%, SHIBE +45% … KOSM/FTCH
+−13%). Full suite: 89 pass.
+
+Committed as `9cff18d`. **8 of 11 slices done.** Next: slice 9 (save/load slot browser + new-world
+dialog), then slice 10 (predictions / loans / fees + theming & polish).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
