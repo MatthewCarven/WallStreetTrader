@@ -902,6 +902,24 @@ earnings beat"), a populated ticker, and a 24-row movers board (LNR +50%, SHIBE 
 Committed as `9cff18d`. **8 of 11 slices done.** Next: slice 9 (save/load slot browser + new-world
 dialog), then slice 10 (predictions / loans / fees + theming & polish).
 
+## 2026-07-12 — GUI (V2): Slice 9 — save/load browser + new-world dialog
+
+Added a **Game** menu (`Ctrl+N` / `Ctrl+S` / `Ctrl+L`). Save prompts for a slot name (QInputDialog) and
+writes with `save_game`. A `LoadDialog` browses the slots from `list_saves` — one row each with net
+worth, return and timestamp (pure `model.save_info_line`), Load / Delete / double-click-to-load,
+corrupt slots flagged red. A `NewWorldDialog` collects profile (a dropdown of `PROFILE_NAMES` with each
+profile's tagline from `get_profile`), world seed, starting cash and fee level, then `World.new` +
+`trader.start_world`. Both load and new-world funnel through `_after_world_swap`, which resets the view
+to the watchlist, rebuilds the watch list, clears the news feed, un-plays, and repaints every panel.
+The market freezes (timer stopped) while any of these dialogs is open.
+
+Verified: a pure `save_info_line` test + save/load/new-world assertions in the offscreen smoke, and a
+live round-trip — saved (net worth $4,790.30, tick 2880, 1 position) → swapped to a fresh Calm world
+(reset to $1,000, tick 0, 0 positions) → loaded back to the exact saved state. Full suite: 90 pass.
+
+Committed as `99cfd3f`. **9 of 11 slices done.** Last one: slice 10 (buyable predictions, loans/repay,
+fee-level selector, plus a `:` command line and theming/help polish) → full TUI parity.
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
