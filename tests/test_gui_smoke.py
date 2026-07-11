@@ -216,6 +216,24 @@ _SMOKE = textwrap.dedent(
     ld = LoadDialog(tmp)
     assert "smoke_slot" in [ld.list.item(i).data(Qt.UserRole) for i in range(ld.list.count())]
 
+    # --- Slice 10: predictions, fees, command line ---
+    from trader_pro.gui.app import HelpDialog, PredictDialog
+    gui.view_crypto(); gui.board.selectRow(0)
+    paid = gui.cursor_aid
+    cash0 = gui.trader.world.portfolio.cash
+    pd = PredictDialog(gui.trader, paid); pd._buy()
+    assert pd.bought and "FORECAST" in pd.bought
+    assert gui.trader.world.portfolio.cash < cash0             # forecast cost deducted
+    # fees menu action sets the world's fee level
+    gui.set_fee("high")
+    assert gui.trader.world.config.fee_level == "high"
+    # command line runs any CLI command (loan) and repaints
+    gui.command_line.setText("loan 1000"); gui._run_command()
+    assert gui.trader.world.portfolio.loan_balance() > 0
+    assert gui.command_line.text() == ""                       # cleared after run
+    # help dialog builds
+    assert HelpDialog().windowTitle().startswith("Trader")
+
     print("SMOKE OK")
     """
 )

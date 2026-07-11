@@ -227,3 +227,16 @@ def test_save_info_line(tmp_path):
     assert infos
     line = save_info_line(infos[0])
     assert "mygame" in line and "net worth" in line and "Normal" in line
+
+
+def test_prediction_summary():
+    from trader_pro.core import make_prediction
+    from trader_pro.core.engine import DAY
+    from trader_pro.gui.model import prediction_summary
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    trader = TraderApp(world, universe=uni)
+    aid = kind_ids(world, AssetKind.CRYPTO)[0]
+    pred = make_prediction(world, trader.engine, aid, DAY)
+    s = prediction_summary(pred)
+    assert "FORECAST" in s and aid.split(":", 1)[1] in s and ("UP" in s or "DOWN" in s)

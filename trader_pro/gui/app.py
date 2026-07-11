@@ -12,12 +12,13 @@ board, charts, positions, news and trading dialogs arrive in later slices. Requi
 from __future__ import annotations
 
 import random
+import re
 import sys
 import time
 
 import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter
+from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog, QDialogButtonBox,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -26,7 +27,10 @@ from PySide6.QtWidgets import (
 )
 
 from ..cli import TraderApp, fmt_clock, money
-from ..core import AssetKind, Order, OrderSide, PROFILE_NAMES, World, execute_order, get_profile
+from ..core import (
+    PROFILE_NAMES, AssetKind, Order, OrderSide, World, execute_order, get_profile,
+    make_prediction, quote_cost,
+)
 from ..core.engine import DAY, HOUR
 from ..core.orders import FEE_LEVELS
 from ..persistence import (
@@ -37,8 +41,8 @@ from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
     PANEL, POSITION_COLUMNS, RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
     closure_entry, default_watchlist, event_entry, header_html, kind_ids, margin_call_message,
-    margin_color, margin_fill, movers_ids, position_rows, row_ctx, save_info_line, steps_for,
-    ticker_text, trade_quantity, visible_ids,
+    margin_color, margin_fill, movers_ids, position_rows, prediction_summary, row_ctx,
+    save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
 )
 
 
@@ -404,10 +408,139 @@ class NewWorldDialog(QDialog):
         self.accept()
 
 
+class PredictDialog(QDialog):
+    """Buy a price forecast for an asset (predictions.quote_cost / make_prediction). Deducts the
+    cost from cash on purchase; on buy, self.bought holds the forecast summary line."""
+
+    HORIZONS = [("1 day", DAY), ("6 hours", 6 * HOUR), ("1 hour", HOUR)]
+
+    def __init__(self, trader: TraderApp, aid: str, parent=None):
+        super().__init__(parent)
+        self.trader = trader
+        self.aid = aid
+        self.bought = None
+        self.setWindowTitle(f"Predict · {aid.split(':', 1)[1]}")
+        self.setModal(True)
+        self.setMinimumWidth(430)
+        mono = QFont("Consolas")
+        mono.setStyleHint(QFont.Monospace)
+        mono.setPointSize(10)
+
+        layout = QVBoxLayout(self)
+        self.info = QLabel()
+        self.info.setTextFormat(Qt.RichText)
+        self.info.setFont(mono)
+        layout.addWidget(self.info)
+        row = QHBoxLayout()
+        cap = QLabel("Horizon")
+        cap.setFont(mono)
+        row.addWidget(cap)
+        self.horizon = QComboBox()
+        for label, ticks in self.HORIZONS:
+            self.horizon.addItem(label, ticks)
+        self.horizon.setFont(mono)
+        self.horizon.currentIndexChanged.connect(self._update_cost)
+        row.addWidget(self.horizon)
+        row.addStretch(1)
+        self.cost_label = QLabel()
+        self.cost_label.setFont(mono)
+        row.addWidget(self.cost_label)
+        layout.addLayout(row)
+        self.result = QLabel()
+        self.result.setWordWrap(True)
+        self.result.setFont(mono)
+        self.result.setTextFormat(Qt.RichText)
+        layout.addWidget(self.result)
+        buttons = QHBoxLayout()
+        buy_b = QPushButton("Buy forecast")
+        buy_b.clicked.connect(self._buy)
+        close_b = QPushButton("Close")
+        close_b.clicked.connect(self.reject)
+        buttons.addWidget(buy_b)
+        buttons.addStretch(1)
+        buttons.addWidget(close_b)
+        layout.addLayout(buttons)
+        self.setStyleSheet(
+            f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
+            f"QComboBox {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f" padding: 4px; border-radius: 4px; }}"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f" padding: 5px 14px; border-radius: 4px; }}"
+        )
+        self._refresh_info()
+        self._update_cost()
+
+    def _refresh_info(self):
+        w = self.trader.world
+        self.info.setText(f'<b>{self.aid.split(":", 1)[1]}  {w.name_of(self.aid)}</b><br>'
+                          f'price {money(w.price(self.aid))}    cash {money(w.portfolio.cash)}')
+
+    def _update_cost(self):
+        cost = quote_cost(self.trader.world, self.aid, self.horizon.currentData())
+        self.cost_label.setText(f"cost {money(cost)}")
+
+    def _buy(self):
+        w = self.trader.world
+        horizon = self.horizon.currentData()
+        cost = quote_cost(w, self.aid, horizon)
+        if w.portfolio.cash < cost:
+            self.result.setText(f'<span style="color:{RED}">not enough cash '
+                                f'(need {money(cost)})</span>')
+            return
+        pred = make_prediction(w, self.trader.engine, self.aid, horizon)
+        w.portfolio.cash -= pred.cost
+        self.bought = prediction_summary(pred)
+        color = GREEN if pred.direction == "UP" else RED
+        self.result.setText(f'<span style="color:{color}">{self.bought}</span>')
+        self._refresh_info()
+
+
+HELP_HTML = (
+    "<b>Keys</b><br>"
+    "Space play/pause &nbsp; [ ] slower/faster &nbsp; s / h / d step minute/hour/day<br>"
+    "0–5 views (owned · crypto · stocks · bonds · watch · movers) &nbsp; o sort 1D% &nbsp; c chart range<br>"
+    "Enter / double-click a row to trade &nbsp; : command line &nbsp; ? help<br>"
+    "Ctrl+N new world &nbsp; Ctrl+S save &nbsp; Ctrl+L saves / load<br><br>"
+    "<b>Command line</b> (press : )<br>"
+    "predict &lt;SYM&gt; [1d|6h] &nbsp; loan &lt;amount&gt; &nbsp; repay [amount|all] &nbsp; "
+    "fees &lt;off…diabolic&gt;<br>"
+    "find &lt;text&gt; &nbsp; look &lt;SYM&gt; &nbsp; market &nbsp; news &nbsp; "
+    "buy / sell / short / cover &lt;SYM&gt; &lt;qty | $amt | all&gt;<br>"
+    "(every CLI command works here)"
+)
+
+
+class HelpDialog(QDialog):
+    """Keyboard shortcuts + command-line reference."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Trader PRO — help")
+        self.setModal(True)
+        self.setMinimumWidth(560)
+        mono = QFont("Consolas")
+        mono.setStyleHint(QFont.Monospace)
+        mono.setPointSize(10)
+        layout = QVBoxLayout(self)
+        body = QLabel(HELP_HTML)
+        body.setTextFormat(Qt.RichText)
+        body.setFont(mono)
+        body.setWordWrap(True)
+        layout.addWidget(body, 1)
+        close_b = QPushButton("Close")
+        close_b.clicked.connect(self.accept)
+        layout.addWidget(close_b)
+        self.setStyleSheet(
+            f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f" padding: 5px 14px; border-radius: 4px; }}"
+        )
+
+
 class TraderGUI(QMainWindow):
-    """The main window: header, time controls and the live market board; more panels (chart,
-    positions, news) land in later slices. Holds a `TraderApp` and advances it on a QTimer,
-    exactly as the TUI's `TraderTUI` does with `set_interval`/`_on_timer`."""
+    """The main window: header, time controls, the live market board, chart/equity/detail,
+    positions, news & ticker. Holds a `TraderApp` and advances it on a QTimer, exactly as the
+    TUI's `TraderTUI` does with `set_interval`/`_on_timer`."""
 
     def __init__(self, trader: TraderApp, resumed: bool = False):
         super().__init__()
@@ -463,6 +596,14 @@ class TraderGUI(QMainWindow):
         act_load = game_menu.addAction("Saves / Load…")
         act_load.setShortcut("Ctrl+L")
         act_load.triggered.connect(self.action_load)
+        game_menu.addSeparator()
+        fees_menu = game_menu.addMenu("Fees")
+        for level in FEE_LEVELS:
+            fee_act = fees_menu.addAction(level)
+            fee_act.triggered.connect(lambda _checked=False, lv=level: self.set_fee(lv))
+        help_act = self.menuBar().addMenu("Help").addAction("Shortcuts & commands")
+        help_act.setShortcut("?")
+        help_act.triggered.connect(self.show_help)
 
         central = QWidget(self)
         root = QVBoxLayout(central)
@@ -591,6 +732,10 @@ class TraderGUI(QMainWindow):
         self.selected_label.setFont(mono)
         views.addWidget(self.selected_label)
         views.addSpacing(10)
+        self.predict_btn = QPushButton("Predict")
+        self.predict_btn.setToolTip("Buy a price forecast for the highlighted asset")
+        self.predict_btn.clicked.connect(self.open_predict)
+        views.addWidget(self.predict_btn)
         self.trade_btn = QPushButton("Trade ▸")
         self.trade_btn.setToolTip("Buy / sell / short / cover the highlighted asset  (Enter or double-click)")
         self.trade_btn.clicked.connect(self.open_trade)
@@ -708,6 +853,16 @@ class TraderGUI(QMainWindow):
         self.news.setStyleSheet(
             f"QListWidget {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN}; }}")
         root.addWidget(self.news)
+
+        self.command_line = QLineEdit()
+        self.command_line.setFont(mono)
+        self.command_line.setPlaceholderText(
+            "press :  —  predict NVDA 1d · loan 1000 · repay all · fees high · find tesla · help")
+        self.command_line.returnPressed.connect(self._run_command)
+        self.command_line.setStyleSheet(
+            f"background: {PANEL}; color: {FG}; border: 1px solid {GREEN_HI}; padding: 4px;")
+        root.addWidget(self.command_line)
+        QShortcut(QKeySequence(":"), self, activated=self.command_line.setFocus)
 
         self._rebuild_board()
         self._refresh_chart()
@@ -1138,6 +1293,53 @@ class TraderGUI(QMainWindow):
         self._build_ticker()
         self._log_line(message, GREEN_HI)
         self.statusBar().showMessage(message, 5000)
+
+    # ---- predictions / fees / command line / help ---- #
+
+    def open_predict(self) -> None:
+        aid = self.cursor_aid
+        if not (aid and self.trader.world.has_asset(aid)):
+            return
+        self._timer.stop()
+        try:
+            dlg = PredictDialog(self.trader, aid, self)
+            dlg.exec()
+        finally:
+            self._play_clock = None
+            self._timer.start()
+        if dlg.bought:                              # a forecast was purchased (cash already deducted)
+            self._refresh_header()
+            self._log_line(dlg.bought, AMBER)
+
+    def set_fee(self, level: str) -> None:
+        self.trader.world.config.fee_level = level
+        self._log_line(f"Fees set to '{level}'.", GREEN_HI)
+        self.statusBar().showMessage(f"Fees: {level}", 3000)
+
+    def show_help(self) -> None:
+        HelpDialog(self).exec()
+
+    def _run_command(self) -> None:
+        line = self.command_line.text().strip()
+        self.command_line.clear()
+        if not line:
+            return
+        try:
+            result = self.trader.execute(line)
+        except Exception as exc:
+            result = f"error: {exc}"
+        result = re.sub(r"\x1b\[[0-9;]*m", "", result or "")     # strip any ANSI colour codes
+        self._rebuild_board()                       # state may have changed (trade / loan / fees)
+        self._refresh_header()
+        self._refresh_chart()
+        self._refresh_equity()
+        self._refresh_detail()
+        self._refresh_positions()
+        self._build_ticker()
+        for ln in reversed(result.split("\n")):     # newest-on-top list; keep reading order
+            if ln.strip():
+                self._log_line(ln, DIM)
+        self._log_line(f"› {line}", GREEN_HI)
 
     # ---- persistence ---- #
 

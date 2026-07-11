@@ -419,3 +419,9 @@ def save_info_line(info) -> str:
         return f"{info.name}{tag}   — corrupt / unreadable"
     return (f"{info.name}{tag}   net worth {money(info.net_worth)} ({info.return_pct:+.1f}%)   "
             f"· {info.profile} · {info.saved_at}")
+
+
+def prediction_summary(pred) -> str:
+    """Readable forecast line for a bought Prediction (predictions.make_prediction)."""
+    return (f"FORECAST {pred.asset_id.split(':', 1)[1]}: {pred.direction} to ~{money(pred.forecast)} "
+            f"(range {money(pred.low)}–{money(pred.high)}), confidence {pred.confidence * 100:.0f}%")
