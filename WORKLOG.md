@@ -782,6 +782,22 @@ select a row → `cursor_aid` + label, toggle sort). Full suite: 81 pass.
 
 Committed as `e30677f`. Next: slice 4 (pyqtgraph price chart of the highlighted asset).
 
+## 2026-07-11 — GUI (V2): Slice 4 — pyqtgraph price chart
+
+Added the price chart in a resizable `QSplitter` beside the board (board ~2 : chart ~1, like the
+TUI's 2fr/1fr). It charts the highlighted asset from `engine.series(aid, start, t+1, step)` at ~240
+points, drawn as a filled area — pen and translucent fill green when the window is up, red when down —
+with a title of `SYM · range · price · change%`. Range cycles 1H/1D/3D/1W via the `c` key / Range
+button (`model.CHART_RANGES`). It re-renders on selection change and every tick. The x-axis is hidden
+(tick-minute labels aren't meaningful; a real DateAxis is a later polish item).
+
+pyqtgraph pulls in numpy (already present) and constructs fine under the offscreen platform. Verified
+with a headless render: an 8-day Volatile world, 1W range on a crypto → a 241-point red downtrend area
+that draws correctly as vector graphics (only the axis/label *text* is tofu headless; the curve, fill,
+colour, splitter layout and board cell colours all render right). Full suite: 82 pass.
+
+Committed as `2c33e3e`. Next: slice 5 (net-worth equity curve + asset-detail fundamentals panel).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
