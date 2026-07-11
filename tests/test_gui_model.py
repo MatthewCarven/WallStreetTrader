@@ -171,3 +171,20 @@ def test_margin_call_message():
                           price=60000.0, realized_pnl=-1234.0, message="margin liquidation")
     msg = margin_call_message([res])
     assert "BTR" in msg and "0.5" in msg and "liquidat" in msg.lower()
+
+
+def test_position_rows_after_buy():
+    from trader_pro.core import Order, OrderSide, execute_order
+    from trader_pro.gui.model import position_rows
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    aid = kind_ids(world, AssetKind.CRYPTO)[0]
+    qty = trade_quantity(world, aid, "buy", "$1000")
+    execute_order(world, Order(aid, OrderSide.BUY, qty))
+    rows = position_rows(world)
+    assert len(rows) == 1
+    r = rows[0]
+    assert r[0] == aid and ":" not in r[1]              # (aid, sym)
+    assert r[2] > 0                                     # signed qty (long)
+    assert abs(r[4] - qty * world.price(aid)) < 1e-6   # value = qty * price
+    assert abs(r[5]) < 1e-6                             # unrealized pnl ~0 right after buy

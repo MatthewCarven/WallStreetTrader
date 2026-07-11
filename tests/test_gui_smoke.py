@@ -179,6 +179,11 @@ _SMOKE = textwrap.dedent(
     assert margin_fill(gui.trader.world) > 0.0             # leverage lifts the meter off zero
     assert 0.0 <= gui.margin_meter._fill <= 1.0
 
+    # --- Slice 7 (second half): positions table ---
+    gui._refresh_positions()
+    assert gui.positions_model.rowCount() >= 1             # the open position shows
+    assert "Positions" in gui.pos_summary.text()
+
     print("SMOKE OK")
     """
 )

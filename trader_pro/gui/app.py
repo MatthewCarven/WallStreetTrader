@@ -28,10 +28,10 @@ from ..core import AssetKind, Order, OrderSide, execute_order
 from ..core.engine import DAY, HOUR
 from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
-    AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI, PANEL,
-    RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell, default_watchlist, header_html,
-    kind_ids, margin_call_message, margin_color, margin_fill, row_ctx, steps_for,
-    trade_quantity, visible_ids,
+    AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
+    PANEL, POSITION_COLUMNS, RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
+    default_watchlist, header_html, kind_ids, margin_call_message, margin_color, margin_fill,
+    position_rows, row_ctx, steps_for, trade_quantity, visible_ids,
 )
 
 
@@ -130,6 +130,63 @@ class BoardModel(QAbstractTableModel):
             f = QFont()
             f.setBold(True)
             return f
+        return None
+
+
+class PositionsModel(QAbstractTableModel):
+    """Feeds the positions table from pf.positions via the pure model.position_rows. Columns are
+    POSITION_COLUMNS. refresh() resets when the set of held assets changes, else repaints values
+    in place (so live P&L updates without flicker)."""
+
+    def __init__(self, trader: TraderApp):
+        super().__init__()
+        self.trader = trader
+        self._rows = []          # (aid, sym, qty, cost, value, pnl, pnlpct)
+        self._aids = []
+
+    def refresh(self) -> None:
+        rows = position_rows(self.trader.world)
+        aids = [r[0] for r in rows]
+        if aids != self._aids:
+            self.beginResetModel()
+            self._rows, self._aids = rows, aids
+            self.endResetModel()
+        else:
+            self._rows = rows
+            if rows:
+                self.dataChanged.emit(self.index(0, 0),
+                                      self.index(len(rows) - 1, self.columnCount() - 1),
+                                      [Qt.DisplayRole, Qt.ForegroundRole])
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent=QModelIndex()) -> int:
+        return len(POSITION_COLUMNS)
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+            return POSITION_COLUMNS[section][1]
+        return None
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        _aid, sym, qty, cost, value, pnl, pnlpct = self._rows[index.row()]
+        col = POSITION_COLUMNS[index.column()][0]
+        if role == Qt.DisplayRole:
+            return {"sym": sym, "qty": f"{qty:g}", "cost": money(cost), "value": money(value),
+                    "pnl": f"{pnl:+,.2f}", "pnlpct": f"{pnlpct:+.2f}%"}[col]
+        if role == Qt.ForegroundRole:
+            if col == "qty":
+                return QColor(AMBER if qty < 0 else FG)
+            if col == "value":
+                return QColor(GREEN if value >= 0 else RED)
+            if col in ("pnl", "pnlpct"):
+                return QColor(GREEN if pnl >= 0 else RED)
+            return QColor(FG)
+        if role == Qt.TextAlignmentRole:
+            return int((Qt.AlignLeft if col == "sym" else Qt.AlignRight) | Qt.AlignVCenter)
         return None
 
 
@@ -248,6 +305,7 @@ class TraderGUI(QMainWindow):
         self._curve = None                          # created in _build_ui; guards early refresh
         self._equity_curve = None
         self.margin_meter = None
+        self.positions_model = None
 
         self.setWindowTitle("TRADER PRO")
         self.resize(1120, 720)
@@ -453,8 +511,38 @@ class TraderGUI(QMainWindow):
         self.detail_label.setStyleSheet(f"background: {PANEL}; padding: 6px; border-radius: 4px;")
         right_col.addWidget(self.detail_label)
 
+        # positions panel — summary line + table, tucked under the board on the left
+        pos_panel = QWidget()
+        pos_layout = QVBoxLayout(pos_panel)
+        pos_layout.setContentsMargins(0, 0, 0, 0)
+        pos_layout.setSpacing(4)
+        self.pos_summary = QLabel("Positions")
+        self.pos_summary.setFont(mono)
+        self.pos_summary.setTextFormat(Qt.RichText)
+        pos_layout.addWidget(self.pos_summary)
+        self.positions_model = PositionsModel(self.trader)
+        self.positions = QTableView()
+        self.positions.setModel(self.positions_model)
+        self.positions.setFont(mono)
+        self.positions.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.positions.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.positions.setShowGrid(False)
+        self.positions.setAlternatingRowColors(True)
+        self.positions.verticalHeader().setVisible(False)
+        self.positions.horizontalHeader().setHighlightSections(False)
+        self.positions.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.positions.horizontalHeader().setStretchLastSection(True)
+        pos_layout.addWidget(self.positions, 1)
+
+        left_split = QSplitter(Qt.Vertical)
+        left_split.addWidget(self.board)
+        left_split.addWidget(pos_panel)
+        left_split.setStretchFactor(0, 3)
+        left_split.setStretchFactor(1, 1)
+        left_split.setSizes([520, 200])
+
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self.board)
+        splitter.addWidget(left_split)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 1)
@@ -465,6 +553,7 @@ class TraderGUI(QMainWindow):
         self._refresh_chart()
         self._refresh_equity()
         self._refresh_detail()
+        self._refresh_positions()
 
         self.setCentralWidget(central)
         self._apply_theme()
@@ -539,6 +628,7 @@ class TraderGUI(QMainWindow):
         self._refresh_board()
         self._refresh_chart()
         self._refresh_equity()
+        self._refresh_positions()
         if closures:
             self._notify_margin_call(closures)
 
@@ -561,6 +651,7 @@ class TraderGUI(QMainWindow):
         self._refresh_board()
         self._refresh_chart()
         self._refresh_equity()
+        self._refresh_positions()
         if self.autosave_enabled and now - self._last_autosave >= AUTOSAVE_SECS:
             self._autosave()
             self._last_autosave = now
@@ -716,6 +807,20 @@ class TraderGUI(QMainWindow):
         aid = self.cursor_aid
         self.detail_label.setText(asset_detail_html(w, aid) if (aid and w.has_asset(aid)) else "")
 
+    def _refresh_positions(self) -> None:
+        if self.positions_model is None:
+            return
+        self.positions_model.refresh()
+        pf = self.trader.world.portfolio
+        po = self.trader.world.price_of
+        upnl = pf.unrealized_pnl(po)
+        upnl_c = GREEN if upnl >= 0 else RED
+        self.pos_summary.setText(
+            f'Positions ({self.positions_model.rowCount()})   '
+            f'unrealized <span style="color:{upnl_c}">{upnl:+,.2f}</span>   '
+            f'<span style="color:{DIM}">margin headroom {money(pf.maintenance_excess(po))}</span>'
+        )
+
     # ---- trading ---- #
 
     def open_trade(self) -> None:
@@ -738,6 +843,7 @@ class TraderGUI(QMainWindow):
         self._refresh_chart()
         self._refresh_equity()
         self._refresh_detail()
+        self._refresh_positions()
         extra = ""
         if res.fee:
             extra += f"   fee {money(res.fee)}"

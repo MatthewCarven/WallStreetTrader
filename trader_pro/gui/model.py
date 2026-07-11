@@ -346,3 +346,27 @@ def margin_call_message(closures) -> str:
              f"@ {money(c.price)}   (P&L {c.realized_pnl:+,.2f})" for c in closures]
     return ("The market moved against your leverage. To restore your maintenance margin the broker "
             "liquidated:\n\n" + "\n".join(lines))
+
+
+POSITION_COLUMNS = [("sym", "Symbol"), ("qty", "Qty"), ("cost", "Avg Cost"),
+                    ("value", "Value"), ("pnl", "P&L"), ("pnlpct", "P&L %")]
+
+
+def position_rows(world) -> list:
+    """One row per held position: (aid, sym, qty, avg_cost, value, unrealized_pnl, pnl_pct).
+    qty is signed (negative = short); pnl / pnl_pct are the unrealized close-now result (a short
+    profits as price falls)."""
+    w = world
+    pf = w.portfolio
+    rows = []
+    for aid in pf.positions:
+        if not w.has_asset(aid):
+            continue
+        pos = pf.positions[aid]
+        price = w.price(aid)
+        qty = pos.quantity
+        pnl = (price - pos.avg_cost) * qty
+        pnlpct = ((price / pos.avg_cost - 1) * 100 * (1.0 if qty >= 0 else -1.0)
+                  if pos.avg_cost else 0.0)
+        rows.append((aid, aid.split(":", 1)[1], qty, pos.avg_cost, qty * price, pnl, pnlpct))
+    return rows
