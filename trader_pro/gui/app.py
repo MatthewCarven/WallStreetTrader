@@ -14,11 +14,12 @@ from __future__ import annotations
 import sys
 import time
 
+import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QHBoxLayout, QHeaderView, QLabel,
-    QMainWindow, QPushButton, QTableView, QVBoxLayout, QWidget,
+    QMainWindow, QPushButton, QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
@@ -26,9 +27,9 @@ from ..core import AssetKind
 from ..core.engine import DAY, HOUR
 from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
-    AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, DIM, FG, GREEN, GREEN_HI, PANEL, SPEEDS,
-    TIMER_MS, boot, cell, default_watchlist, header_html, kind_ids, row_ctx, steps_for,
-    visible_ids,
+    AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI, PANEL,
+    RED, SPEEDS, TIMER_MS, boot, cell, default_watchlist, header_html, kind_ids, row_ctx,
+    steps_for, visible_ids,
 )
 
 
@@ -128,6 +129,8 @@ class TraderGUI(QMainWindow):
         self.view_page = 0
         self.page_size = 25
         self.cursor_aid: str | None = None
+        self.chart_range = 1                        # index into CHART_RANGES (default 1D)
+        self._curve = None                          # created in _build_ui; guards early refresh
 
         self.setWindowTitle("TRADER PRO")
         self.resize(1120, 720)
@@ -269,8 +272,42 @@ class TraderGUI(QMainWindow):
         self.board.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.board.horizontalHeader().setStretchLastSection(True)
         self.board.selectionModel().currentRowChanged.connect(self._on_row_changed)
-        root.addWidget(self.board, 1)
+
+        # right column — the price chart now; equity curve / positions / news land in later slices
+        right = QWidget()
+        right_col = QVBoxLayout(right)
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_col.setSpacing(6)
+        chart_bar = QHBoxLayout()
+        self.range_btn = QPushButton(f"Range: {CHART_RANGES[self.chart_range][0]}")
+        self.range_btn.setShortcut("c")
+        self.range_btn.setToolTip("Cycle chart range: 1H / 1D / 3D / 1W  (c)")
+        self.range_btn.clicked.connect(self.cycle_chart_range)
+        chart_bar.addWidget(self.range_btn)
+        chart_bar.addStretch(1)
+        right_col.addLayout(chart_bar)
+
+        self.chart = pg.PlotWidget()
+        self.chart.setBackground(PANEL)
+        self.chart.showGrid(x=False, y=True, alpha=0.15)
+        self.chart.setMenuEnabled(False)
+        self.chart.hideButtons()
+        self.chart.setMouseEnabled(x=False, y=False)
+        self.chart.getPlotItem().hideAxis("bottom")     # tick-minute x labels aren't meaningful
+        self.chart.getAxis("left").setTextPen(DIM)
+        self._curve = self.chart.plot([], [])
+        right_col.addWidget(self.chart, 1)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(self.board)
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([680, 420])
+        root.addWidget(splitter, 1)
+
         self._rebuild_board()
+        self._refresh_chart()
 
         self.setCentralWidget(central)
         self._apply_theme()
@@ -343,6 +380,7 @@ class TraderGUI(QMainWindow):
         self.trader._advance(ticks)             # events/closures surface in the news slice (8)
         self._refresh_header()
         self._refresh_board()
+        self._refresh_chart()
 
     def _on_timer(self) -> None:
         if not self.playing:
@@ -361,6 +399,7 @@ class TraderGUI(QMainWindow):
         self.trader._advance(steps)             # events/closures surface in the news slice (8)
         self._refresh_header()
         self._refresh_board()
+        self._refresh_chart()
         if self.autosave_enabled and now - self._last_autosave >= AUTOSAVE_SECS:
             self._autosave()
             self._last_autosave = now
@@ -438,6 +477,7 @@ class TraderGUI(QMainWindow):
     def _on_row_changed(self, current, _previous) -> None:
         self.cursor_aid = self.board_model.aid_at(current.row())
         self._update_selected_label()
+        self._refresh_chart()
 
     def _update_selected_label(self) -> None:
         w = self.trader.world
@@ -448,6 +488,43 @@ class TraderGUI(QMainWindow):
             )
         else:
             self.selected_label.setText("")
+
+    # ---- price chart ---- #
+
+    def cycle_chart_range(self) -> None:
+        self.chart_range = (self.chart_range + 1) % len(CHART_RANGES)
+        self.range_btn.setText(f"Range: {CHART_RANGES[self.chart_range][0]}")
+        self._refresh_chart()
+
+    def _refresh_chart(self) -> None:
+        if self._curve is None:                     # chart not built yet — guard early refreshes
+            return
+        w, eng = self.trader.world, self.trader.engine
+        aid = self.cursor_aid
+        if not (aid and w.has_asset(aid)):
+            self._curve.setData([], [])
+            self.chart.setTitle("highlight an asset to chart it", color=DIM, size="10pt")
+            return
+        label, span = CHART_RANGES[self.chart_range]
+        t = w.market.tick_index
+        start = max(0, t - span)
+        step = max(1, span // 240)                  # ~240 points across the panel
+        series = eng.series(aid, start, t + 1, step)
+        ys = [p for _, p in series]
+        if not ys:
+            self._curve.setData([], [])
+            return
+        xs = [tk for tk, _ in series]
+        cur = w.price(aid)
+        chg = (cur / ys[0] - 1) * 100 if ys[0] else 0.0
+        color = GREEN if chg >= 0 else RED
+        fill = QColor(color)
+        fill.setAlpha(45)
+        self._curve.setData(xs, ys, pen=pg.mkPen(color, width=2), fillLevel=min(ys), fillBrush=fill)
+        self.chart.setTitle(
+            f"{aid.split(':', 1)[1]} · {label}    {money(cur)}   {chg:+.2f}%",
+            color=color, size="10pt",
+        )
 
     # ---- persistence ---- #
 

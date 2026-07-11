@@ -121,3 +121,9 @@ def test_visible_ids_sort_orders_by_change_desc():
                          sort_by_change=True, watch=watch, view_page=0, page_size=25)
     chgs = [chg_pct(world, eng, a, 1) for a in ids]
     assert chgs == sorted(chgs, reverse=True)
+
+
+def test_chart_ranges_defined():
+    from trader_pro.gui.model import CHART_RANGES
+    assert [label for label, _ in CHART_RANGES] == ["1H", "1D", "3D", "1W"]
+    assert all(span > 0 for _, span in CHART_RANGES)

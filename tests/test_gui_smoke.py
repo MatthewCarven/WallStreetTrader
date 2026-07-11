@@ -118,6 +118,19 @@ _SMOKE = textwrap.dedent(
     gui.toggle_sort(); assert gui.sort_by_change is True
     gui.toggle_sort(); assert gui.sort_by_change is False
 
+    # --- Slice 4: price chart ---
+    from trader_pro.gui.model import CHART_RANGES
+    gui.view_watch()
+    gui.board.selectRow(0)
+    gui._refresh_chart()
+    xdata, ydata = gui._curve.getData()
+    assert xdata is not None and len(xdata) > 1            # a real series for the selected asset
+    r0 = gui.chart_range
+    gui.cycle_chart_range()
+    assert gui.chart_range == (r0 + 1) % len(CHART_RANGES)
+    assert gui.range_btn.text().startswith("Range:")
+    gui._refresh_chart()                                   # re-render at the new range, no crash
+
     print("SMOKE OK")
     """
 )

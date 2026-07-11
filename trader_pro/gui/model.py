@@ -10,7 +10,7 @@ from collections import namedtuple
 
 from ..cli import TraderApp, fmt_clock, money
 from ..core import AssetKind, World, load_seed_universe
-from ..core.engine import DAY
+from ..core.engine import DAY, HOUR, WEEK
 from ..persistence import autosave_path, has_autosave, load_game
 
 # Live-play speeds as ticks (sim-minutes) advanced per REAL second — mirrors tui.py SPEEDS.
@@ -19,6 +19,9 @@ SPEEDS = [("1 min/s", 1), ("10 min/s", 10), ("1 hr/s", 60), ("10 hr/s", 600)]
 TIMER_MS = 250              # QTimer cadence; pacing is frame-rate independent (see steps_for)
 AUTOSAVE_SECS = 30         # wall-clock throttle for periodic autosave while playing
 DEFAULT_SEED = 20260614    # the same fresh-world seed the CLI and TUI use
+
+# Price-chart ranges (label, span in ticks), cycled with the `c` key — mirrors tui.py CHART_RANGES.
+CHART_RANGES = [("1H", HOUR), ("1D", DAY), ("3D", 3 * DAY), ("1W", WEEK)]
 
 # Retro green-phosphor palette (echoes the TUI's colour scheme).
 BG = "#07120b"
