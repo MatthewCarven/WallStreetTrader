@@ -716,6 +716,22 @@ D0 00:00 → 00:01 over ~1.6s of play (the expected 1 min/s). Full suite: 75 pas
 Committed as `61ec9b3`. Next: slice 1 (time & speed controls). The crypto-seed / build_seed / TUI
 default-max-quantity WIP is still left unstaged (Matthew's).
 
+## 2026-07-11 — GUI (V2): Slice 1 — time & speed controls
+
+Fleshed out the shell's time surface. The controls row now carries « / » to cycle `SPEEDS`
+(1 min/s → 10 min/s → 1 hr/s → 10 hr/s, clamped at both ends, bound to `[` / `]`) and
+Step / +1h / +1d to jump the market by 1 / 60 / 1440 sim-minutes (bound to `s` / `h` / `d`). The
+discrete steps advance immediately whether playing or paused and never touch the play-clock
+baseline — same semantics as the TUI's `action_step`/`hour`/`day` — and a +1d jump stays cheap
+because the engine evaluates seeded anchors rather than grinding 1440 minutes. Throttled 30s
+autosave and resume already shipped in slice 0, so nothing to add there.
+
+Verified in the offscreen subprocess smoke: speed clamps at both ends, the three steps move the
+clock by exactly 1 / +HOUR / +DAY regardless of play state, and every control button carries a
+keyboard shortcut. Full suite: 75 pass.
+
+Committed as `1458ef2`. Next: slice 2 (the live market board). WIP still unstaged (Matthew's).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
