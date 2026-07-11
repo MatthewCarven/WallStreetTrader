@@ -6,8 +6,11 @@ mirror the TUI's so the GUI paces and reads identically.
 """
 from __future__ import annotations
 
+from collections import namedtuple
+
 from ..cli import TraderApp, fmt_clock, money
 from ..core import World, load_seed_universe
+from ..core.engine import DAY
 from ..persistence import autosave_path, has_autosave, load_game
 
 # Live-play speeds as ticks (sim-minutes) advanced per REAL second — mirrors tui.py SPEEDS.
@@ -97,3 +100,105 @@ def header_html(world: World) -> str:
     if pf.is_margin_call(po):
         line3 += _span(f"{sp}⚠ MARGIN CALL", RED, bold=True)
     return f"{line1}<br>{line2}<br>{line3}"
+
+
+# --------------------------------------------------------------------------- #
+# Market board — the data behind the table, ported from the TUI's _RowCtx /
+# BOARD_COLUMNS / _chgNd / _add_row (tui.py:509-533, 715, 878). Pure: the Qt
+# model in app.py maps these onto display / colour / alignment roles.
+# --------------------------------------------------------------------------- #
+
+NOTABLE_STOCKS = ["AAPL", "MSFT", "NVDA", "AMZN", "JPM", "XOM", "GOOGL", "TSLA"]
+
+# One board row's precomputed values. `qty` is signed (negative = short); `value` = qty * price.
+RowCtx = namedtuple("RowCtx", "sym price chg chg7d chg31d qty value cost pnl")
+
+# One rendered cell: display text, colour, right-alignment, bold. Qt-free on purpose.
+Cell = namedtuple("Cell", "text color right bold")
+
+BOARD_COLUMNS = [
+    ("symbol", "Symbol"),
+    ("price", "Price"),
+    ("chg", "1D %"),
+    ("chg7d", "7D %"),
+    ("chg31d", "31D %"),
+    ("pos", "Pos"),
+    ("value", "Value"),
+    ("cost", "Cost/Sh"),
+    ("pnl", "P&L %"),
+]
+
+
+def chg_pct(world, engine, aid: str, num_days: int) -> float:
+    """N-day % change — price now vs `num_days` ago. Mirrors the TUI's _chgNd (tui.py:715)."""
+    t = world.market.tick_index
+    price = world.price(aid)
+    prev = engine.price_at(aid, max(0, t - num_days * DAY))
+    return (price / prev - 1) * 100 if prev > 0 else 0.0
+
+
+def row_ctx(world, engine, aid: str) -> RowCtx:
+    """Precompute one board row for `aid`. Mirrors the TUI's _add_row (tui.py:878)."""
+    pos = world.portfolio.positions.get(aid)
+    price = world.price(aid)
+    qty = pos.quantity if pos else 0.0
+    cost = pos.avg_cost if pos else 0.0
+    # Unrealized return if closed now: +% in profit for longs and shorts alike (a short profits as
+    # price falls). Fees ignored, matching the side panel's P&L.
+    pnl = (price - cost) / cost * 100 * (1.0 if qty >= 0 else -1.0) if (qty and cost) else 0.0
+    return RowCtx(
+        aid.split(":", 1)[1], price,
+        chg_pct(world, engine, aid, 1),
+        chg_pct(world, engine, aid, 7),
+        chg_pct(world, engine, aid, 31),
+        qty, qty * price, cost, pnl,
+    )
+
+
+def cell(ctx: RowCtx, col_id: str) -> Cell:
+    """Render one board cell (text, colour, alignment, weight) — the Qt-free equivalent of the
+    BOARD_COLUMNS render lambdas (tui.py:511)."""
+    if col_id == "symbol":
+        return Cell(ctx.sym, FG, False, True)
+    if col_id == "price":
+        return Cell(money(ctx.price), FG, True, False)
+    if col_id == "chg":
+        return Cell(f"{ctx.chg:+.2f}%", GREEN if ctx.chg >= 0 else RED, True, False)
+    if col_id == "chg7d":
+        return Cell(f"{ctx.chg7d:+.2f}%", GREEN if ctx.chg7d >= 0 else RED, True, False)
+    if col_id == "chg31d":
+        return Cell(f"{ctx.chg31d:+.2f}%", GREEN if ctx.chg31d >= 0 else RED, True, False)
+    if col_id == "pos":
+        color = AMBER if ctx.qty < 0 else (FG if ctx.qty else DIM)
+        return Cell(f"{ctx.qty:g}" if ctx.qty else "·", color, True, False)
+    if col_id == "value":
+        color = GREEN if ctx.value > 0 else (RED if ctx.value < 0 else DIM)
+        return Cell(money(ctx.value) if ctx.value else "·", color, True, False)
+    if col_id == "cost":
+        return Cell(money(ctx.cost) if ctx.cost else "·", DIM, True, False)
+    if col_id == "pnl":
+        color = GREEN if ctx.pnl > 0 else (RED if ctx.pnl < 0 else DIM)
+        return Cell(f"{ctx.pnl:+.2f}%" if (ctx.qty and ctx.cost) else "·", color, True, False)
+    raise KeyError(col_id)
+
+
+def default_watchlist(world) -> list[str]:
+    """The starting watchlist: every crypto coin plus a few notable stocks. Mirrors tui.py:613."""
+    watch = [f"CRYPTO:{c.symbol}" for c in world.universe.crypto]
+    for sym in NOTABLE_STOCKS:
+        aid = f"STOCK:{sym}"
+        if world.has_asset(aid):
+            watch.append(aid)
+    return watch
+
+
+def board_ids(world) -> list[str]:
+    """The default board: held positions pinned on top, then the watchlist, deduped. A simple
+    stand-in for the TUI's _visible() — view switching / sorting / paging arrive in slice 3."""
+    held = [a for a in world.portfolio.positions if world.has_asset(a)]
+    seen, out = set(), []
+    for aid in held + default_watchlist(world):
+        if aid not in seen and world.has_asset(aid):
+            seen.add(aid)
+            out.append(aid)
+    return out

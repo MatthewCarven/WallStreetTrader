@@ -14,24 +14,89 @@ from __future__ import annotations
 import sys
 import time
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QKeySequence
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QMainWindow, QPushButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+    QPushButton, QTableView, QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
 from ..core.engine import DAY, HOUR
 from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
-    AMBER, AUTOSAVE_SECS, BG, DIM, FG, GREEN, GREEN_HI, PANEL, SPEEDS, TIMER_MS,
-    boot, header_html, steps_for,
+    AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, DIM, FG, GREEN, GREEN_HI, PANEL, SPEEDS,
+    TIMER_MS, board_ids, boot, cell, header_html, row_ctx, steps_for,
 )
 
 
+class BoardModel(QAbstractTableModel):
+    """Feeds the market board's QTableView from the live world. Columns are BOARD_COLUMNS; each
+    cell's text / colour / alignment / weight come from the pure `cell()` helper, so this model
+    just maps them onto Qt roles. `refresh()` recomputes the row values in place and repaints
+    without resetting (keeping selection); `set_aids()` swaps the whole list (a reset)."""
+
+    def __init__(self, trader: TraderApp):
+        super().__init__()
+        self.trader = trader
+        self.aids: list[str] = []
+        self._rows: list = []
+
+    def set_aids(self, aids) -> None:
+        self.beginResetModel()
+        self.aids = list(aids)
+        self._recompute()
+        self.endResetModel()
+
+    def _recompute(self) -> None:
+        w, eng = self.trader.world, self.trader.engine
+        self._rows = [row_ctx(w, eng, aid) for aid in self.aids]
+
+    def refresh(self) -> None:
+        if not self.aids:
+            return
+        self._recompute()
+        top = self.index(0, 0)
+        bottom = self.index(self.rowCount() - 1, self.columnCount() - 1)
+        self.dataChanged.emit(top, bottom, [Qt.DisplayRole, Qt.ForegroundRole])
+
+    def aid_at(self, row: int) -> str | None:
+        return self.aids[row] if 0 <= row < len(self.aids) else None
+
+    # ---- Qt model interface ---- #
+
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._rows)
+
+    def columnCount(self, parent=QModelIndex()) -> int:
+        return len(BOARD_COLUMNS)
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+            return BOARD_COLUMNS[section][1]
+        return None
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        c = cell(self._rows[index.row()], BOARD_COLUMNS[index.column()][0])
+        if role == Qt.DisplayRole:
+            return c.text
+        if role == Qt.ForegroundRole:
+            return QColor(c.color)
+        if role == Qt.TextAlignmentRole:
+            return int((Qt.AlignRight if c.right else Qt.AlignLeft) | Qt.AlignVCenter)
+        if role == Qt.FontRole and c.bold:
+            f = QFont()
+            f.setBold(True)
+            return f
+        return None
+
+
 class TraderGUI(QMainWindow):
-    """The main window: header + controls now, panels later. Holds a `TraderApp` and advances it
-    on a QTimer, exactly as the TUI's `TraderTUI` does with `set_interval`/`_on_timer`."""
+    """The main window: header, time controls and the live market board; more panels (chart,
+    positions, news) land in later slices. Holds a `TraderApp` and advances it on a QTimer,
+    exactly as the TUI's `TraderTUI` does with `set_interval`/`_on_timer`."""
 
     def __init__(self, trader: TraderApp, resumed: bool = False):
         super().__init__()
@@ -120,14 +185,21 @@ class TraderGUI(QMainWindow):
         controls.addWidget(self.state_label)
         root.addLayout(controls)
 
-        placeholder = QLabel(
-            "Slice 0 shell — live clock, header, play/pause, autosave.\n\n"
-            "Market board, charts, positions, news and trading arrive in the next slices."
-        )
-        placeholder.setAlignment(Qt.AlignCenter)
-        placeholder.setWordWrap(True)
-        placeholder.setStyleSheet(f"color: {DIM};")
-        root.addWidget(placeholder, 1)
+        self.board_model = BoardModel(self.trader)
+        self.board = QTableView()
+        self.board.setModel(self.board_model)
+        self.board.setFont(mono)
+        self.board.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.board.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.board.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.board.setShowGrid(False)
+        self.board.setAlternatingRowColors(True)
+        self.board.verticalHeader().setVisible(False)
+        self.board.horizontalHeader().setHighlightSections(False)
+        self.board.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.board.horizontalHeader().setStretchLastSection(True)
+        root.addWidget(self.board, 1)
+        self.board_model.set_aids(board_ids(self.trader.world))
 
         self.setCentralWidget(central)
         self._apply_theme()
@@ -142,6 +214,11 @@ class TraderGUI(QMainWindow):
             f" padding: 5px 16px; border-radius: 4px; }}"
             f"QPushButton:hover {{ border: 1px solid {GREEN_HI}; }}"
             f"QStatusBar {{ color: {AMBER}; }}"
+            f"QTableView {{ background: {BG}; alternate-background-color: {PANEL}; color: {FG};"
+            f" gridline-color: {PANEL}; selection-background-color: {GREEN};"
+            f" selection-color: {BG}; border: 1px solid {PANEL}; outline: none; }}"
+            f"QHeaderView::section {{ background: {PANEL}; color: {DIM}; padding: 4px 10px;"
+            f" border: none; border-bottom: 1px solid {GREEN}; }}"
         )
 
     def _welcome_text(self) -> str:
@@ -194,6 +271,7 @@ class TraderGUI(QMainWindow):
         action_step/hour/day. Cheap even for +1d: the engine evaluates seeded anchors directly."""
         self.trader._advance(ticks)             # events/closures surface in the news slice (8)
         self._refresh_header()
+        self._refresh_board()
 
     def _on_timer(self) -> None:
         if not self.playing:
@@ -211,12 +289,16 @@ class TraderGUI(QMainWindow):
             return
         self.trader._advance(steps)             # events/closures surface in the news slice (8)
         self._refresh_header()
+        self._refresh_board()
         if self.autosave_enabled and now - self._last_autosave >= AUTOSAVE_SECS:
             self._autosave()
             self._last_autosave = now
 
     def _refresh_header(self) -> None:
         self.header_label.setText(header_html(self.trader.world))
+
+    def _refresh_board(self) -> None:
+        self.board_model.refresh()
 
     # ---- persistence ---- #
 

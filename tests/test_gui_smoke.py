@@ -25,10 +25,12 @@ _SMOKE = textwrap.dedent(
     """
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
     from trader_pro.cli import TraderApp, fmt_clock
     from trader_pro.core import World, load_seed_universe
     from trader_pro.gui.app import TraderGUI
+    from trader_pro.gui.model import BOARD_COLUMNS
 
     app = QApplication.instance() or QApplication([])
     uni = load_seed_universe()
@@ -81,6 +83,17 @@ _SMOKE = textwrap.dedent(
     assert not gui.day_btn.shortcut().isEmpty()
     assert not gui.faster_btn.shortcut().isEmpty()
     assert not gui.slower_btn.shortcut().isEmpty()
+
+    # --- Slice 2: market board ---
+    assert gui.board_model.rowCount() > 0
+    assert gui.board_model.columnCount() == len(BOARD_COLUMNS)
+    assert gui.board_model.headerData(0, Qt.Horizontal, Qt.DisplayRole) == "Symbol"
+    price_cell = gui.board_model.data(gui.board_model.index(0, 1), Qt.DisplayRole)
+    assert price_cell.startswith("$")                     # price column renders as money
+    first_aid = gui.board_model.aid_at(0)
+    assert first_aid and ":" in first_aid
+    gui._refresh_board()                                  # live repaint keeps the model consistent
+    assert gui.board_model.rowCount() > 0
 
     print("SMOKE OK")
     """
