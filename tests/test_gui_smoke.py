@@ -140,6 +140,34 @@ _SMOKE = textwrap.dedent(
     gui._refresh_detail()
     assert gui.cursor_aid.split(":", 1)[1] in gui.detail_label.text()   # detail shows the symbol
 
+    # --- Slice 6: trade dialog (buy / sell / short / cover over execute_order) ---
+    from trader_pro.gui.app import TradeDialog
+    gui.view_watch(); gui.board.selectRow(0)
+    aid = gui.cursor_aid
+    cash0 = gui.trader.world.portfolio.cash
+    dlg = TradeDialog(gui.trader, aid)
+    dlg.qty.setText("$1000")
+    dlg._act("buy")
+    assert dlg.fill is not None and dlg.fill[0] == "buy"               # filled
+    pos = gui.trader.world.portfolio.positions.get(aid)
+    assert pos is not None and pos.quantity > 0                        # now holding it
+    assert gui.trader.world.portfolio.cash < cash0                     # cash spent
+    gui._on_filled(*dlg.fill)                                          # refresh path doesn't crash
+    gui.view_owned()
+    assert gui.board_model.rowCount() >= 1                             # holding shows in Owned
+    # rejection: an absurd order shows a message and does not fill
+    dlg2 = TradeDialog(gui.trader, aid)
+    dlg2.qty.setText("999999999")
+    dlg2._act("buy")
+    assert dlg2.fill is None and dlg2.msg.text()
+    # sell all closes the position
+    dlg3 = TradeDialog(gui.trader, aid)
+    dlg3.qty.setText("all")
+    dlg3._act("sell")
+    assert dlg3.fill is not None
+    left = gui.trader.world.portfolio.positions.get(aid)
+    assert left is None or abs(left.quantity) < 1e-9
+
     print("SMOKE OK")
     """
 )

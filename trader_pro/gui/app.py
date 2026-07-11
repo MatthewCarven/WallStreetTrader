@@ -18,18 +18,18 @@ import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QHBoxLayout, QHeaderView, QLabel,
-    QMainWindow, QPushButton, QSplitter, QTableView, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QButtonGroup, QDialog, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QMainWindow, QPushButton, QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
-from ..core import AssetKind
+from ..core import AssetKind, Order, OrderSide, execute_order
 from ..core.engine import DAY, HOUR
 from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI, PANEL,
     RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell, default_watchlist, header_html,
-    kind_ids, row_ctx, steps_for, visible_ids,
+    kind_ids, row_ctx, steps_for, trade_quantity, visible_ids,
 )
 
 
@@ -102,6 +102,92 @@ class BoardModel(QAbstractTableModel):
             f.setBold(True)
             return f
         return None
+
+
+class TradeDialog(QDialog):
+    """Buy / sell / short / cover a single asset — a Qt port of the TUI's TradeDialog. Quantity
+    parsing (empty=max, 'all', '$amount', plain number) is the pure model.trade_quantity; the order
+    runs through execute_order. On a fill, `self.fill` = (verb, qty, sym, ExecutionResult) and the
+    dialog accepts; a rejection shows the reason (res.message) and stays open."""
+
+    def __init__(self, trader: TraderApp, aid: str, parent=None):
+        super().__init__(parent)
+        self.trader = trader
+        self.aid = aid
+        self.fill = None
+        self.setWindowTitle(f"Trade · {aid.split(':', 1)[1]}")
+        self.setModal(True)
+        self.setMinimumWidth(390)
+        mono = QFont("Consolas")
+        mono.setStyleHint(QFont.Monospace)
+        mono.setPointSize(11)
+
+        layout = QVBoxLayout(self)
+        self.info = QLabel()
+        self.info.setTextFormat(Qt.RichText)
+        self.info.setFont(mono)
+        layout.addWidget(self.info)
+
+        self.qty = QLineEdit()
+        self.qty.setPlaceholderText("quantity:   10    ·    $500    ·    all")
+        self.qty.setFont(mono)
+        self.qty.returnPressed.connect(lambda: self._act("buy"))
+        layout.addWidget(self.qty)
+
+        buttons = QHBoxLayout()
+        for verb, label, color in (("buy", "Buy", GREEN), ("sell", "Sell", RED),
+                                   ("short", "Short", AMBER), ("cover", "Cover", GREEN_HI)):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _checked=False, v=verb: self._act(v))
+            b.setStyleSheet(f"border: 1px solid {color}; padding: 5px 14px; border-radius: 4px;")
+            buttons.addWidget(b)
+        layout.addLayout(buttons)
+
+        self.msg = QLabel("")
+        self.msg.setTextFormat(Qt.RichText)
+        self.msg.setFont(mono)
+        self.msg.setWordWrap(True)
+        layout.addWidget(self.msg)
+
+        self.setStyleSheet(
+            f"QDialog {{ background: {BG}; }}"
+            f"QLabel {{ color: {FG}; }}"
+            f"QLineEdit {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f" padding: 5px; border-radius: 4px; }}"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; }}"
+            f"QPushButton:hover {{ background: {BG}; }}"
+        )
+        self._refresh_info()
+        self.qty.setFocus()
+
+    def _refresh_info(self) -> None:
+        w = self.trader.world
+        aid = self.aid
+        pos = w.portfolio.positions.get(aid)
+        held = pos.quantity if pos else 0.0
+        self.info.setText(
+            f'<b>{aid.split(":", 1)[1]}  {w.name_of(aid)}</b><br>'
+            f'price {money(w.price(aid))}<br>'
+            f'<span style="color:{DIM}">you hold {held:g}    cash {money(w.portfolio.cash)}<br>'
+            f'buying power {money(w.portfolio.buying_power(w.price_of))}</span>'
+        )
+
+    def _act(self, verb: str) -> None:
+        w = self.trader.world
+        qty = trade_quantity(w, self.aid, verb, self.qty.text())
+        if qty <= 0:
+            self._show("enter a valid quantity", AMBER)
+            return
+        side = OrderSide.BUY if verb in ("buy", "cover") else OrderSide.SELL
+        res = execute_order(w, Order(self.aid, side, qty))
+        if not res.filled:                          # rejected — keep open, show why
+            self._show(res.message, RED)
+            return
+        self.fill = (verb, qty, self.aid.split(":", 1)[1], res)
+        self.accept()
+
+    def _show(self, text: str, color: str) -> None:
+        self.msg.setText(f'<span style="color:{color}">{text}</span>')
 
 
 class TraderGUI(QMainWindow):
@@ -257,6 +343,11 @@ class TraderGUI(QMainWindow):
         self.selected_label = QLabel("")
         self.selected_label.setFont(mono)
         views.addWidget(self.selected_label)
+        views.addSpacing(10)
+        self.trade_btn = QPushButton("Trade ▸")
+        self.trade_btn.setToolTip("Buy / sell / short / cover the highlighted asset  (Enter or double-click)")
+        self.trade_btn.clicked.connect(self.open_trade)
+        views.addWidget(self.trade_btn)
         root.addLayout(views)
 
         self.board_model = BoardModel(self.trader)
@@ -273,6 +364,7 @@ class TraderGUI(QMainWindow):
         self.board.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.board.horizontalHeader().setStretchLastSection(True)
         self.board.selectionModel().currentRowChanged.connect(self._on_row_changed)
+        self.board.activated.connect(lambda _idx: self.open_trade())   # Enter / double-click a row
 
         # right column — the price chart now; equity curve / positions / news land in later slices
         right = QWidget()
@@ -579,6 +671,35 @@ class TraderGUI(QMainWindow):
         w = self.trader.world
         aid = self.cursor_aid
         self.detail_label.setText(asset_detail_html(w, aid) if (aid and w.has_asset(aid)) else "")
+
+    # ---- trading ---- #
+
+    def open_trade(self) -> None:
+        aid = self.cursor_aid
+        if not (aid and self.trader.world.has_asset(aid)):
+            return
+        self._timer.stop()                          # freeze the market while the dialog is open
+        try:
+            dlg = TradeDialog(self.trader, aid, self)
+            accepted = dlg.exec()
+        finally:
+            self._play_clock = None                 # don't bank the paused time on resume
+            self._timer.start()
+        if accepted and dlg.fill:
+            self._on_filled(*dlg.fill)
+
+    def _on_filled(self, verb: str, qty: float, sym: str, res) -> None:
+        self._rebuild_board()                       # holdings changed — re-pin owned rows
+        self._refresh_header()
+        self._refresh_chart()
+        self._refresh_equity()
+        self._refresh_detail()
+        extra = ""
+        if res.fee:
+            extra += f"   fee {money(res.fee)}"
+        if res.realized_pnl:
+            extra += f"   realized {money(res.realized_pnl)}"
+        self.statusBar().showMessage(f"{verb} {qty:g} {sym} @ {money(res.price)}{extra}", 6000)
 
     # ---- persistence ---- #
 

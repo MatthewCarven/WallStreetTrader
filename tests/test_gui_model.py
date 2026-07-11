@@ -3,7 +3,7 @@ from trader_pro.cli import TraderApp
 from trader_pro.core import AssetKind, World, load_seed_universe
 from trader_pro.gui.model import (
     AMBER, DIM, GREEN, RED, RowCtx, asset_detail_html, board_ids, boot, cell, chg_pct,
-    default_watchlist, header_html, kind_ids, row_ctx, steps_for, visible_ids,
+    default_watchlist, header_html, kind_ids, row_ctx, steps_for, trade_quantity, visible_ids,
 )
 
 
@@ -139,3 +139,17 @@ def test_asset_detail_html_by_kind():
         assert aid.split(":", 1)[1] in html         # symbol shown
         assert kind.name.title() in html            # kind shown
         assert field in html                        # kind-specific fundamental label present
+
+
+def test_trade_quantity_parsing():
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    aid = kind_ids(world, AssetKind.CRYPTO)[0]
+    price = world.price(aid)
+    assert trade_quantity(world, aid, "buy", "10") == 10                      # plain number
+    assert abs(trade_quantity(world, aid, "buy", "$1000") - 1000 / price) < 1e-9   # dollar amount
+    bp = world.portfolio.buying_power(world.price_of)
+    assert abs(trade_quantity(world, aid, "buy", "") - bp / price) < 1e-6     # empty buy => max
+    assert trade_quantity(world, aid, "sell", "") == 0.0                      # nothing held
+    assert trade_quantity(world, aid, "sell", "all") == 0.0
+    assert trade_quantity(world, aid, "buy", "abc") == 0.0                    # garbage => 0

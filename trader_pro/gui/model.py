@@ -285,3 +285,31 @@ def asset_detail_html(world, aid: str) -> str:
         ]
     body = "<br>".join(f'{_span(k + ":", DIM)} {v}' for k, v in rows)
     return f"{head}<br>{body}"
+
+
+def trade_quantity(world, aid: str, verb: str, token: str) -> float:
+    """Resolve an order quantity from the raw input, the pure core of the TUI's TradeDialog._act
+    (tui.py:242). Empty => max (buying power / whole position); 'all' => the whole long/short;
+    '$amount' => amount / price; else a plain float. Returns 0.0 if the token is unparseable."""
+    pf = world.portfolio
+    price = world.price(aid)
+    pos = pf.positions.get(aid)
+    token = token.strip()
+    if not token:
+        if verb in ("buy", "short"):
+            return pf.buying_power(world.price_of) / price if price else 0.0
+        if verb == "sell":
+            return pos.quantity if pos and pos.quantity > 0 else 0.0
+        if verb == "cover":
+            return -pos.quantity if pos and pos.quantity < 0 else 0.0
+        return 0.0
+    low = token.lower()
+    if verb == "sell" and low == "all":
+        return pos.quantity if pos and pos.quantity > 0 else 0.0
+    if verb == "cover" and low == "all":
+        return -pos.quantity if pos and pos.quantity < 0 else 0.0
+    tok = low.replace(",", "")
+    try:
+        return float(tok[1:]) / price if tok.startswith("$") else float(tok)
+    except ValueError:
+        return 0.0
