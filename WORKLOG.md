@@ -732,6 +732,30 @@ keyboard shortcut. Full suite: 75 pass.
 
 Committed as `1458ef2`. Next: slice 2 (the live market board). WIP still unstaged (Matthew's).
 
+## 2026-07-11 — GUI (V2): Slice 2 — live market board
+
+The centerpiece: a `QTableView` over a `QAbstractTableModel` (`BoardModel`) showing the nine
+board columns — Symbol, Price, 1D/7D/31D %, Pos, Value, Cost/Sh, P&L % — repainting every tick.
+
+Ported the board's data logic into pure, Qt-free helpers in `gui/model.py`: `chg_pct` (= the TUI's
+`_chgNd`), `row_ctx` (= `_add_row`), and `cell()` — the Qt-free equivalent of the BOARD_COLUMNS
+render lambdas, returning `(text, colour, right-align, bold)` so the Qt model just maps them onto
+roles. `board_ids()`/`default_watchlist()` are a deliberately simple stand-in for the TUI's
+`_visible()` (held pinned on top, then the crypto+notable-stock watchlist, deduped); view switching,
+sort and paging are slice 3. `BoardModel.refresh()` recomputes values in place and emits
+`dataChanged` so a live repaint keeps selection; `set_aids()` is the full reset. Colours match the
+TUI — green/red deltas, amber shorts, dim `·` placeholders for unheld rows. Table styled via QSS
+(header rule, alternating rows, green selection).
+
+Keeping the data logic pure paid off for testing: `test_gui_model.py` covers row/cell formatting
+(long, short, flat) and `board_ids` with no Qt at all, while the offscreen subprocess smoke checks
+the model wiring (row/column counts, header labels, a money-formatted price cell). Also eyeballed a
+text dump of the live board over 3 sim-days — sane symbols, prices and 1D/7D/31D moves (7D and 31D
+coincide that early because both clamp to since-start, which is correct). Full suite: 78 pass.
+
+Committed as `03b0e64`. Next: slice 3 (board interaction — views / sort / selection / paging). WIP
+still unstaged (Matthew's).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
