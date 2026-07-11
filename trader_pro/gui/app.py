@@ -15,12 +15,13 @@ import sys
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMainWindow, QPushButton, QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
+from ..core.engine import DAY, HOUR
 from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, DIM, FG, GREEN, GREEN_HI, PANEL, SPEEDS, TIMER_MS,
@@ -71,13 +72,48 @@ class TraderGUI(QMainWindow):
         root.addWidget(self.header_label)
 
         controls = QHBoxLayout()
+        controls.setSpacing(6)
         self.play_btn = QPushButton("▶  Play")
         self.play_btn.setShortcut("Space")
+        self.play_btn.setToolTip("Play / pause  (Space)")
         self.play_btn.clicked.connect(self.toggle_play)
         controls.addWidget(self.play_btn)
+
+        self.slower_btn = QPushButton("«")
+        self.slower_btn.setShortcut(QKeySequence("["))
+        self.slower_btn.setToolTip("Slower  ( [ )")
+        self.slower_btn.clicked.connect(self.slower)
+        controls.addWidget(self.slower_btn)
+
         self.speed_label = QLabel(SPEEDS[self.speed_idx][0])
         self.speed_label.setFont(mono)
+        self.speed_label.setAlignment(Qt.AlignCenter)
+        self.speed_label.setMinimumWidth(88)
         controls.addWidget(self.speed_label)
+
+        self.faster_btn = QPushButton("»")
+        self.faster_btn.setShortcut(QKeySequence("]"))
+        self.faster_btn.setToolTip("Faster  ( ] )")
+        self.faster_btn.clicked.connect(self.faster)
+        controls.addWidget(self.faster_btn)
+
+        controls.addSpacing(18)
+        self.step_btn = QPushButton("Step")
+        self.step_btn.setShortcut("s")
+        self.step_btn.setToolTip("Advance 1 minute  (s)")
+        self.step_btn.clicked.connect(self.step_minute)
+        controls.addWidget(self.step_btn)
+        self.hour_btn = QPushButton("+1h")
+        self.hour_btn.setShortcut("h")
+        self.hour_btn.setToolTip("Advance 1 hour  (h)")
+        self.hour_btn.clicked.connect(self.step_hour)
+        controls.addWidget(self.hour_btn)
+        self.day_btn = QPushButton("+1d")
+        self.day_btn.setShortcut("d")
+        self.day_btn.setToolTip("Advance 1 day  (d)")
+        self.day_btn.clicked.connect(self.step_day)
+        controls.addWidget(self.day_btn)
+
         controls.addStretch(1)
         self.state_label = QLabel("paused")
         self.state_label.setFont(mono)
@@ -128,6 +164,36 @@ class TraderGUI(QMainWindow):
         else:
             self.play_btn.setText("▶  Play")
             self.state_label.setText("paused")
+
+    def faster(self) -> None:
+        self.speed_idx = min(len(SPEEDS) - 1, self.speed_idx + 1)
+        self._update_speed()
+
+    def slower(self) -> None:
+        self.speed_idx = max(0, self.speed_idx - 1)
+        self._update_speed()
+
+    def _update_speed(self) -> None:
+        label = SPEEDS[self.speed_idx][0]
+        self.speed_label.setText(label)
+        if self.playing:
+            self.state_label.setText(f"playing · {label}")
+
+    def step_minute(self) -> None:
+        self._advance_now(1)
+
+    def step_hour(self) -> None:
+        self._advance_now(HOUR)
+
+    def step_day(self) -> None:
+        self._advance_now(DAY)
+
+    def _advance_now(self, ticks: int) -> None:
+        """A discrete manual advance (Step / +1h / +1d) — jumps the market immediately, whether
+        playing or paused, and never banks against the play clock. Mirrors the TUI's
+        action_step/hour/day. Cheap even for +1d: the engine evaluates seeded anchors directly."""
+        self.trader._advance(ticks)             # events/closures surface in the news slice (8)
+        self._refresh_header()
 
     def _on_timer(self) -> None:
         if not self.playing:

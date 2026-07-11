@@ -56,6 +56,32 @@ _SMOKE = textwrap.dedent(
     gui.toggle_play()
     assert gui.playing is False
 
+    # --- Slice 1: time & speed controls ---
+    from trader_pro.core.engine import DAY, HOUR
+    from trader_pro.gui.model import SPEEDS
+
+    assert gui.speed_idx == 0
+    gui.faster()
+    assert gui.speed_idx == 1 and "10 min/s" in gui.speed_label.text()
+    gui.slower(); gui.slower()
+    assert gui.speed_idx == 0                              # clamps at the slow end
+    for _ in range(len(SPEEDS) + 3):
+        gui.faster()
+    assert gui.speed_idx == len(SPEEDS) - 1                # clamps at the fast end
+
+    # discrete steps advance the clock exactly, regardless of play state
+    t = gui.trader.world.market.tick_index
+    gui.step_minute(); assert gui.trader.world.market.tick_index == t + 1
+    gui.step_hour();   assert gui.trader.world.market.tick_index == t + 1 + HOUR
+    gui.step_day();    assert gui.trader.world.market.tick_index == t + 1 + HOUR + DAY
+
+    # keyboard shortcuts are wired onto the control buttons
+    assert not gui.step_btn.shortcut().isEmpty()
+    assert not gui.hour_btn.shortcut().isEmpty()
+    assert not gui.day_btn.shortcut().isEmpty()
+    assert not gui.faster_btn.shortcut().isEmpty()
+    assert not gui.slower_btn.shortcut().isEmpty()
+
     print("SMOKE OK")
     """
 )
