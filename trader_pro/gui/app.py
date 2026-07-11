@@ -28,8 +28,8 @@ from ..core.engine import DAY, HOUR
 from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI, PANEL,
-    RED, SPEEDS, TIMER_MS, boot, cell, default_watchlist, header_html, kind_ids, row_ctx,
-    steps_for, visible_ids,
+    RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell, default_watchlist, header_html,
+    kind_ids, row_ctx, steps_for, visible_ids,
 )
 
 
@@ -131,6 +131,7 @@ class TraderGUI(QMainWindow):
         self.cursor_aid: str | None = None
         self.chart_range = 1                        # index into CHART_RANGES (default 1D)
         self._curve = None                          # created in _build_ui; guards early refresh
+        self._equity_curve = None
 
         self.setWindowTitle("TRADER PRO")
         self.resize(1120, 720)
@@ -278,6 +279,20 @@ class TraderGUI(QMainWindow):
         right_col = QVBoxLayout(right)
         right_col.setContentsMargins(0, 0, 0, 0)
         right_col.setSpacing(6)
+
+        # net-worth equity curve (from pf.nw_history) — small, fixed height at the top
+        self.equity_chart = pg.PlotWidget()
+        self.equity_chart.setBackground(PANEL)
+        self.equity_chart.showGrid(x=False, y=True, alpha=0.12)
+        self.equity_chart.setMenuEnabled(False)
+        self.equity_chart.hideButtons()
+        self.equity_chart.setMouseEnabled(x=False, y=False)
+        self.equity_chart.getPlotItem().hideAxis("bottom")
+        self.equity_chart.getAxis("left").setTextPen(DIM)
+        self.equity_chart.setMaximumHeight(130)
+        self._equity_curve = self.equity_chart.plot([], [])
+        right_col.addWidget(self.equity_chart)
+
         chart_bar = QHBoxLayout()
         self.range_btn = QPushButton(f"Range: {CHART_RANGES[self.chart_range][0]}")
         self.range_btn.setShortcut("c")
@@ -298,6 +313,16 @@ class TraderGUI(QMainWindow):
         self._curve = self.chart.plot([], [])
         right_col.addWidget(self.chart, 1)
 
+        # asset-detail fundamentals for the highlighted asset
+        self.detail_label = QLabel("")
+        self.detail_label.setTextFormat(Qt.RichText)
+        self.detail_label.setWordWrap(True)
+        self.detail_label.setFont(mono)
+        self.detail_label.setAlignment(Qt.AlignTop)
+        self.detail_label.setMaximumHeight(160)
+        self.detail_label.setStyleSheet(f"background: {PANEL}; padding: 6px; border-radius: 4px;")
+        right_col.addWidget(self.detail_label)
+
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.board)
         splitter.addWidget(right)
@@ -308,6 +333,8 @@ class TraderGUI(QMainWindow):
 
         self._rebuild_board()
         self._refresh_chart()
+        self._refresh_equity()
+        self._refresh_detail()
 
         self.setCentralWidget(central)
         self._apply_theme()
@@ -381,6 +408,7 @@ class TraderGUI(QMainWindow):
         self._refresh_header()
         self._refresh_board()
         self._refresh_chart()
+        self._refresh_equity()
 
     def _on_timer(self) -> None:
         if not self.playing:
@@ -400,6 +428,7 @@ class TraderGUI(QMainWindow):
         self._refresh_header()
         self._refresh_board()
         self._refresh_chart()
+        self._refresh_equity()
         if self.autosave_enabled and now - self._last_autosave >= AUTOSAVE_SECS:
             self._autosave()
             self._last_autosave = now
@@ -478,6 +507,7 @@ class TraderGUI(QMainWindow):
         self.cursor_aid = self.board_model.aid_at(current.row())
         self._update_selected_label()
         self._refresh_chart()
+        self._refresh_detail()
 
     def _update_selected_label(self) -> None:
         w = self.trader.world
@@ -525,6 +555,30 @@ class TraderGUI(QMainWindow):
             f"{aid.split(':', 1)[1]} · {label}    {money(cur)}   {chg:+.2f}%",
             color=color, size="10pt",
         )
+
+    def _refresh_equity(self) -> None:
+        if self._equity_curve is None:
+            return
+        hist = self.trader.world.portfolio.nw_history
+        if not hist:
+            self._equity_curve.setData([], [])
+            return
+        xs = [t for t, _ in hist]
+        ys = [v for _, v in hist]
+        start_cash = self.trader.world.config.starting_cash
+        color = GREEN if ys[-1] >= start_cash else RED
+        fill = QColor(color)
+        fill.setAlpha(40)
+        self._equity_curve.setData(xs, ys, pen=pg.mkPen(color, width=2),
+                                   fillLevel=min(ys), fillBrush=fill)
+        ret = (ys[-1] / start_cash - 1) * 100 if start_cash else 0.0
+        self.equity_chart.setTitle(f"net worth {money(ys[-1])}  ({ret:+.1f}%)",
+                                   color=color, size="9pt")
+
+    def _refresh_detail(self) -> None:
+        w = self.trader.world
+        aid = self.cursor_aid
+        self.detail_label.setText(asset_detail_html(w, aid) if (aid and w.has_asset(aid)) else "")
 
     # ---- persistence ---- #
 

@@ -131,6 +131,15 @@ _SMOKE = textwrap.dedent(
     assert gui.range_btn.text().startswith("Range:")
     gui._refresh_chart()                                   # re-render at the new range, no crash
 
+    # --- Slice 5: equity curve + asset detail ---
+    gui.trader._advance(2 * 1440)                          # add net-worth history points
+    gui._refresh_equity()
+    ex, ey = gui._equity_curve.getData()
+    assert ex is not None and len(ex) >= 1                 # equity curve has points
+    gui.view_watch(); gui.board.selectRow(0)
+    gui._refresh_detail()
+    assert gui.cursor_aid.split(":", 1)[1] in gui.detail_label.text()   # detail shows the symbol
+
     print("SMOKE OK")
     """
 )

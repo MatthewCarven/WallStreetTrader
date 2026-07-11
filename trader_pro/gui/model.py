@@ -248,3 +248,40 @@ def visible_ids(world, engine, *, view_source, owned_only, sort_by_change, watch
     page_ids = cands[page * page_size:(page + 1) * page_size]
     label = f"page {page + 1}/{total}" if total > 1 else None
     return held + page_ids, label
+
+
+def asset_detail_html(world, aid: str) -> str:
+    """Fundamentals for the highlighted asset, as Qt rich text. Reads `world.meta_of(aid)` (the
+    seed record); fields differ by kind (models.py: StockSeed / BondSeed / CryptoSeed)."""
+    kind = world.kind_of(aid)
+    meta = world.meta_of(aid)
+    sym = aid.split(":", 1)[1]
+    head = (f'{_span(sym, FG, bold=True)}  {_span(world.name_of(aid), DIM)}<br>'
+            f'{_span(kind.name.title(), AMBER)}')
+    if kind is AssetKind.STOCK:
+        rows = [
+            ("sector", meta.sector),
+            ("industry", meta.sub_industry),
+            ("fair value", money(meta.fair_value)),
+            ("growth", f"{meta.growth_rate * 100:.1f}%/yr"),
+            ("volatility", f"{meta.volatility * 100:.0f}%"),
+            ("market cap", f"${meta.market_cap / 1e9:.1f}B"),
+        ]
+    elif kind is AssetKind.BOND:
+        rows = [
+            ("issuer", meta.issuer_type),
+            ("rating", meta.rating),
+            ("coupon", f"{meta.coupon_rate * 100:.2f}%"),
+            ("maturity", f"{meta.maturity_years:g}y"),
+            ("base yield", f"{meta.base_yield * 100:.2f}%"),
+        ]
+    else:  # CRYPTO
+        rows = [
+            ("archetype", meta.archetype),
+            ("fair value", money(meta.fair_value)),
+            ("volatility", f"{meta.volatility * 100:.0f}%"),
+            ("anchor", f"{meta.fundamental_strength:.2f}"),
+            ("supply", f"{meta.circulating_supply:,.0f}"),
+        ]
+    body = "<br>".join(f'{_span(k + ":", DIM)} {v}' for k, v in rows)
+    return f"{head}<br>{body}"

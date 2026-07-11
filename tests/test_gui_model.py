@@ -2,8 +2,8 @@
 from trader_pro.cli import TraderApp
 from trader_pro.core import AssetKind, World, load_seed_universe
 from trader_pro.gui.model import (
-    AMBER, DIM, GREEN, RED, RowCtx, board_ids, boot, cell, chg_pct, default_watchlist,
-    header_html, kind_ids, row_ctx, steps_for, visible_ids,
+    AMBER, DIM, GREEN, RED, RowCtx, asset_detail_html, board_ids, boot, cell, chg_pct,
+    default_watchlist, header_html, kind_ids, row_ctx, steps_for, visible_ids,
 )
 
 
@@ -127,3 +127,15 @@ def test_chart_ranges_defined():
     from trader_pro.gui.model import CHART_RANGES
     assert [label for label, _ in CHART_RANGES] == ["1H", "1D", "3D", "1W"]
     assert all(span > 0 for _, span in CHART_RANGES)
+
+
+def test_asset_detail_html_by_kind():
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    for kind, field in ((AssetKind.STOCK, "sector"), (AssetKind.BOND, "rating"),
+                        (AssetKind.CRYPTO, "archetype")):
+        aid = kind_ids(world, kind)[0]
+        html = asset_detail_html(world, aid)
+        assert aid.split(":", 1)[1] in html         # symbol shown
+        assert kind.name.title() in html            # kind shown
+        assert field in html                        # kind-specific fundamental label present
