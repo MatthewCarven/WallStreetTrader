@@ -136,9 +136,11 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
   5        top movers (biggest gainers & losers, whole market)
   o        sort the board by 1D %  (toggle)
   c        cycle the chart range   (1H → 1D → 3D → 1W)
-  Ctrl+1…7 show / hide a board column  (toggle)
-           [dim]1 Symbol · 2 Price · 3 1D% · 4 Pos · 5 Value · 6 Cost · 7 P&L[/]
+  ← →      previous / next page on the board
+  Ctrl+1…9 show / hide a board column  (toggle)
+           [dim]1 Symbol · 2 Price · 3 1D% · 4 7D% · 5 31D% · 6 Pos · 7 Value · 8 Cost · 9 P&L[/]
   Enter   open a buy/sell dialog for the highlighted row
+  +/=, -/_  buy/sell 1 unit · [b]Ctrl[/] + [b]+/=, -/_[/] buy/sell 1000
   [  ]     slower / faster   (1 min/s → 10 hr/s of sim-time per real second)
   s        step one minute      h  +1 hour      d  +1 day
   :        open the command line
@@ -504,7 +506,7 @@ class LoadScreen(ModalScreen):
 # map to the seven ids below, in this order. Each entry is (id, header, render), where `render`
 # turns a per-row context (`_RowCtx`) into that column's cell. Keep the list, the Ctrl+N
 # bindings, and the Ctrl+N help line in sync if you add or reorder columns.
-_RowCtx = namedtuple("_RowCtx", "sym price chg qty value cost pnl")
+_RowCtx = namedtuple("_RowCtx", "sym price chg chg7d chg31d qty value cost pnl")
 
 BOARD_COLUMNS = [
     ("symbol", "Symbol",
@@ -513,6 +515,10 @@ BOARD_COLUMNS = [
         lambda c: Text(money(c.price), justify="right")),
     ("chg", "1D %",
         lambda c: Text(f"{c.chg:+.2f}%", style="green" if c.chg >= 0 else "red", justify="right")),
+    ("chg7d", "7D %",
+        lambda c: Text(f"{c.chg7d:+.2f}%", style="green" if c.chg7d >= 0 else "red", justify="right")),
+    ("chg31d", "31D %",
+        lambda c: Text(f"{c.chg31d:+.2f}%", style="green" if c.chg31d >= 0 else "red", justify="right")),
     ("pos", "Pos",
         lambda c: Text(f"{c.qty:g}" if c.qty else "·", justify="right",
                        style="yellow" if c.qty < 0 else ("white" if c.qty else "dim"))),
@@ -551,6 +557,8 @@ class TraderTUI(App):
         ("h", "hour", "+1h"),
         ("d", "day", "+1d"),
         ("colon", "command", "Command"),
+        Binding("left", "prev_page", "Prev Page", show=False),
+        Binding("right", "next_page", "Next Page", show=False),
         ("1", "view_crypto", "Crypto"),
         ("2", "view_stocks", "Stocks"),
         ("3", "view_bonds", "Bonds"),
@@ -559,16 +567,22 @@ class TraderTUI(App):
         ("5", "view_movers", "Movers"),
         ("o", "toggle_sort", "Sort %"),
         ("c", "chart_range", "Chart range"),
-        # Ctrl+1..Ctrl+7 show/hide the seven board columns (kept off the footer to avoid clutter;
+        # Ctrl+1..9 show/hide the nine board columns (kept off the footer to avoid clutter;
         # documented in the help panel). Ids/order must match BOARD_COLUMNS.
         Binding("ctrl+1", "toggle_column('symbol')", "Col Symbol", show=False),
         Binding("ctrl+2", "toggle_column('price')", "Col Price", show=False),
         Binding("ctrl+3", "toggle_column('chg')", "Col 1D%", show=False),
-        Binding("ctrl+4", "toggle_column('pos')", "Col Pos", show=False),
-        Binding("ctrl+5", "toggle_column('value')", "Col Value", show=False),
-        Binding("ctrl+6", "toggle_column('cost')", "Col Cost", show=False),
-        Binding("ctrl+7", "toggle_column('pnl')", "Col P&L%", show=False),
+        Binding("ctrl+4", "toggle_column('chg7d')", "Col 7D%", show=False),
+        Binding("ctrl+5", "toggle_column('chg31d')", "Col 31D%", show=False),
+        Binding("ctrl+6", "toggle_column('pos')", "Col Pos", show=False),
+        Binding("ctrl+7", "toggle_column('value')", "Col Value", show=False),
+        Binding("ctrl+8", "toggle_column('cost')", "Col Cost", show=False),
+        Binding("ctrl+9", "toggle_column('pnl')", "Col P&L%", show=False),
         ("question_mark", "help", "Help"),
+        Binding("=", "buy_one", "Buy 1", show=False),
+        Binding("-", "sell_one", "Sell 1", show=False),
+        Binding("+", "buy_1000", "Buy 1000", show=False),
+        Binding("underscore", "sell_1000", "Sell 1000", show=False),
         ("q", "quit", "Quit"),
         Binding("ctrl+c", "force_quit", "Quit", priority=True),
         Binding("ctrl+q", "force_quit", "Quit", priority=True),
@@ -698,13 +712,17 @@ class TraderTUI(App):
 
     # ---- shared math ---- #
 
-    def _chg1d(self, aid: str) -> float:
-        """1-day % change for an asset (price now vs one DAY ago)."""
+    def _chgNd(self, aid: str, num_days: int) -> float:
+        """N-day % change for an asset (price now vs N days ago)."""
         w, eng = self.trader.world, self.trader.engine
         t = w.market.tick_index
         price = w.price(aid)
-        prev = eng.price_at(aid, max(0, t - DAY))
+        prev = eng.price_at(aid, max(0, t - num_days * DAY))
         return (price / prev - 1) * 100 if prev > 0 else 0.0
+
+    def _chg1d(self, aid: str) -> float:
+        """1-day % change for an asset (price now vs one DAY ago)."""
+        return self._chgNd(aid, 1)
 
     def _movers(self, n: int = 10) -> tuple[list[tuple[float, str]], list[tuple[float, str]]]:
         """(gainers, losers) — the n biggest 1D% up/down moves across the whole market."""
@@ -858,19 +876,19 @@ class TraderTUI(App):
         table.add_row(*cells, key=key)
 
     def _add_row(self, table: DataTable, aid: str) -> None:
-        w, eng = self.trader.world, self.trader.engine
+        w = self.trader.world
         pf = w.portfolio
-        t = w.market.tick_index
         price = w.price(aid)
-        prev = eng.price_at(aid, max(0, t - DAY))
-        chg = (price / prev - 1) * 100 if prev > 0 else 0.0
+        chg = self._chgNd(aid, 1)
+        chg7d = self._chgNd(aid, 7)
+        chg31d = self._chgNd(aid, 31)
         pos = pf.positions.get(aid)
         qty = pos.quantity if pos else 0.0
         cost = pos.avg_cost if pos else 0.0
         # Unrealized return if you closed the position now: +% when in profit, for longs and shorts
         # alike (a short profits as price falls). Fees are ignored, matching the side panel's P&L.
         pnl = (price - cost) / cost * 100 * (1.0 if qty >= 0 else -1.0) if (qty and cost) else 0.0
-        ctx = _RowCtx(aid.split(":", 1)[1], price, chg, qty, qty * price, cost, pnl)
+        ctx = _RowCtx(aid.split(":", 1)[1], price, chg, chg7d, chg31d, qty, qty * price, cost, pnl)
         table.add_row(*[render(ctx) for _, _, render in self._visible_columns()], key=aid)
 
     def _refresh(self, keep_row: bool = False) -> None:
@@ -1075,6 +1093,62 @@ class TraderTUI(App):
         ev, clo = self.trader._advance(DAY)
         self._log_events(ev); self._log_closures(clo); self._refresh()
 
+    def _quick_trade(self, side: OrderSide, qty: float) -> None:
+        """Execute a quick trade for a given quantity of the highlighted asset."""
+        if not self.cursor_aid or not self.trader.world.has_asset(self.cursor_aid):
+            self._log(Text("no asset highlighted to trade", style="yellow"))
+            return
+
+        aid = self.cursor_aid
+        res = execute_order(self.trader.world, Order(aid, side, qty))
+
+        if res.filled:
+            verb = "bought" if side == OrderSide.BUY else "sold"
+            fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
+            sym = aid.split(":", 1)[1]
+            self._log(Text(f"{verb} {qty:g} {sym} @ {money(res.price)}{fee_txt} "
+                           f"(P&L {res.realized_pnl:+,.2f})", style="green"))
+        else:
+            self._log(Text(f"order rejected: {res.message}", style="red"))
+
+        self._refresh(keep_row=True)
+
+    def action_buy_one(self) -> None:
+        """Buy 1 unit of the highlighted asset (+/= keys)."""
+        self._quick_trade(OrderSide.BUY, 1.0)
+
+    def action_sell_one(self) -> None:
+        """Sell 1 unit of the highlighted asset (-/_ keys)."""
+        self._quick_trade(OrderSide.SELL, 1.0)
+
+    def action_buy_1000(self) -> None:
+        """Buy 1000 units of the highlighted asset (Ctrl + =/+)."""
+        self._quick_trade(OrderSide.BUY, 1000.0)
+
+    def action_sell_1000(self) -> None:
+        """Sell 1000 units of the highlighted asset (Ctrl + -/_)."""
+        self._quick_trade(OrderSide.SELL, 1000.0)
+
+    def action_next_page(self) -> None:
+        """Go to the next page of the current board view."""
+        if self.view_source and not self.owned_only:
+            self.view_page += 1
+            self._refresh()
+            try:
+                self.query_one("#board", DataTable).move_cursor(row=0)
+            except Exception:
+                pass
+
+    def action_prev_page(self) -> None:
+        """Go to the previous page of the current board view."""
+        if self.view_source and not self.owned_only:
+            self.view_page -= 1
+            self._refresh()
+            try:
+                self.query_one("#board", DataTable).move_cursor(row=0)
+            except Exception:
+                pass
+
     def action_command(self) -> None:
         self.set_focus(self.query_one("#cmd", Input))
 
@@ -1086,7 +1160,7 @@ class TraderTUI(App):
         self._render_chart()
 
     def action_toggle_column(self, cid: str) -> None:
-        """Show/hide a board column (Ctrl+1..Ctrl+7). Session-only -- resets to all-on next launch.
+        """Show/hide a board column (Ctrl+1..9). Session-only -- resets to all-on next launch.
         Refuses to hide the last remaining column so the board never ends up with zero columns."""
         # A modal owns the screen while it's open (the board isn't queryable) -- ignore the key.
         if len(self.screen_stack) > 1 or cid not in self.col_visible:
