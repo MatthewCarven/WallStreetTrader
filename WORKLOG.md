@@ -679,3 +679,39 @@ crosses the 1-tick threshold, so it now bumps to the top tier to observe the adv
 to the default. Full suite: 69 pass.
 
 Committed as `95c244c`. The TradeDialog default-max-quantity WIP is still left unstaged (Matthew's).
+
+## 2026-07-11 — GUI (V2): Slice 0 — PySide6 desktop shell & live clock
+
+Kicked off a desktop GUI front-end — the V2 client from design.md §9, built as a native Python app
+(PySide6) rather than the originally-sketched browser client. Matthew asked how to "carve out a GUI"
+and we planned it together: 11 thin, independently-runnable slices at full TUI parity, on PySide6 +
+pyqtgraph (LGPL, and no version-pin fragility like the Textual freeze). This is slice 0, the walking
+skeleton.
+
+The enabling fact, confirmed by mapping the reuse surface: the core is genuinely UI-agnostic and
+`TraderApp` is already the shared controller the TUI leans on (`trader._advance` / `resolve` /
+`start_world`). So the GUI is a thin Qt view layer over the same `TraderApp` + core reads — not a
+rewrite — and the TUI is left completely untouched.
+
+Structure quarantines the Qt dependency: `gui/model.py` holds the pure, Qt-free logic (the pacing
+accumulator `steps_for`, the `boot` resume/new lifecycle, and `header_html`) so it imports and
+unit-tests without PySide6; `gui/app.py` is the only module that imports Qt. `TraderGUI(QMainWindow)`
+renders the dashboard header and drives a `QTimer` loop that mirrors the TUI's wall-clock accumulator
+exactly — advance by REAL elapsed × the speed's ticks/second, default 1 sim-minute per real second,
+same single-step stall cap. Boot resumes the last autosave or starts the seed-20260614 Normal world
+(matching `run_tui()`); autosave fires on close. Launchers `python play_gui.py` and
+`python -m trader_pro.gui` both print an install hint if PySide6 is absent. Deps are optional extras
+in requirements.txt — PySide6 ships stable-ABI (abi3) wheels, so they install even on this box's
+Python 3.14.
+
+One real snag worth recording: PySide6 (shiboken) installs a global import hook that, on 3.14,
+collides with Textual's lazy `textual.widgets.__getattr__` when both are imported into one
+interpreter — it surfaces as `ImportError: ... has no class '__wrapped__'` during pytest collection
+once the GUI and TUI test modules load together. The two front-ends never share a process in real
+use, so the fix is to keep PySide6 out of the main pytest interpreter: the GUI smoke test runs
+offscreen in a subprocess, while the pure model tests run in-process. Verified end-to-end — offscreen
+widget construction + header/advance wiring, plus a live event-loop run that advanced the clock
+D0 00:00 → 00:01 over ~1.6s of play (the expected 1 min/s). Full suite: 75 pass (67 + 8 new).
+
+Committed as `61ec9b3`. Next: slice 1 (time & speed controls). The crypto-seed / build_seed / TUI
+default-max-quantity WIP is still left unstaged (Matthew's).
