@@ -67,8 +67,8 @@ async def _scenario() -> None:
         await pilot.pause()
         ids2, label2 = app._visible()
         assert app.view_page == 1 and "page 2/" in label2 and ids2[0] != first0
-        # crypto (12) -> no Next row
-        await pilot.press("1")
+        # bonds (22) fit on one page -> no Next row
+        await pilot.press("3")
         assert app._visible()[1] is None
 
         # speed control

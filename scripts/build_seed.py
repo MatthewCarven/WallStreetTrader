@@ -210,6 +210,39 @@ CRYPTO_DEFS = [
     ("MEMZ", "Memez",       "meme",           0.0021,   1.45, 0.06, 90_000_000_000),
     ("SUSD", "StableUSD",   "stablecoin",     1.00,     0.02, 0.98, 80_000_000_000),
 ]
+CRYPTO_DEFS.extend([
+    ("ORB",  "Orion",       "platform",       25.0,     0.85, 0.38, 600_000_000),
+    ("ZAP",  "ZapFi",       "defi",           4.50,     1.20, 0.20, 1_500_000_000),
+    ("SHIBE","ShibaInuClassic", "meme",       0.00005,  1.60, 0.04, 550_000_000_000),
+    ("EURE", "StableEUR",   "stablecoin",     1.08,     0.03, 0.97, 50_000_000_000),
+])
+CRYPTO_DEFS.extend([
+    ("ZECP", "Zenith",          "privacy",    75.0,      0.80, 0.42, 21_000_000),
+    ("AXIA", "Axia Infinity",   "gaming",     35.0,      1.15, 0.28, 270_000_000),
+    ("PEPE2","Pepe Classic",    "meme",       8e-07,     1.75, 0.02, 420_690_000_000_000),
+    ("UNIQ", "Uniq Protocol",   "defi",       8.50,      1.25, 0.22, 1_000_000_000),
+])
+# Broader coverage of today's crypto sectors — L2 rollups, AI compute, DePIN,
+# oracles, real-world assets, liquid staking, interop, and exchange tokens.
+# Still all fictional; names/scales are riffs on real categories, not real coins.
+CRYPTO_DEFS.extend([
+    ("LINX", "Linkchain",       "oracle",         15.0,      0.95, 0.42, 620_000_000),
+    ("KOSM", "Kosmos",          "interop",        9.50,      1.00, 0.35, 360_000_000),
+    ("PDOT", "Polkabit",        "interop",        6.00,      0.95, 0.38, 1_400_000_000),
+    ("TENS", "TensorMind",      "ai",             340.0,     1.10, 0.40, 7_500_000),
+    ("RNDX", "Renderos",        "ai",             7.20,      1.15, 0.30, 520_000_000),
+    ("FTCH", "FetchWise",       "ai",             1.55,      1.20, 0.25, 1_150_000_000),
+    ("HELM", "Helion",          "depin",          5.80,      1.05, 0.30, 165_000_000),
+    ("FYLE", "Fylecoin",        "depin",          5.20,      0.95, 0.35, 520_000_000),
+    ("ARBX", "Arbitrix",        "layer2",         1.05,      1.10, 0.30, 2_800_000_000),
+    ("OPTI", "Optimus",         "layer2",         2.30,      1.10, 0.30, 1_100_000_000),
+    ("ONDA", "Ondine",          "rwa",            1.30,      0.85, 0.48, 1_400_000_000),
+    ("LIDX", "Lidus",           "liquid-staking", 2.10,      0.90, 0.40, 900_000_000),
+    ("BNX",  "Binex Coin",      "exchange",       540.0,     0.80, 0.45, 150_000_000),
+    ("AVLN", "Avalon",          "platform",       38.0,      0.95, 0.36, 410_000_000),
+    ("BONK2","Bonko",           "meme",           0.000022,  1.70, 0.03, 88_000_000_000),
+    ("SLVR", "Silvercoin",      "store-of-value", 27.0,      0.60, 0.45, 130_000_000),
+])
 
 
 def build_crypto() -> list[dict]:
