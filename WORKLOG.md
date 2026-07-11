@@ -715,3 +715,32 @@ D0 00:00 → 00:01 over ~1.6s of play (the expected 1 min/s). Full suite: 75 pas
 
 Committed as `61ec9b3`. Next: slice 1 (time & speed controls). The crypto-seed / build_seed / TUI
 default-max-quantity WIP is still left unstaged (Matthew's).
+
+## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
+
+Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
+2026 crypto sectors (CoinGecko narratives, CryptoRank Q2 recap) to ground the *categories* — RWA
+(~$29B on-chain), DePIN (~$35B), AI compute (Render/Bittensor/Fetch shape), Layer-2 rollups, and
+oracles — then invented a curated batch of **16 new fictional coins** across them. Kept everything
+fictional on purpose: design.md §3.3 and §7.4 call for "a small hand-authored set of fictional
+coins," and the existing names are riffs on real categories, not real coins. New coins are the same:
+Linkchain (oracle), Kosmos/Polkabit (interop), TensorMind/Renderos/FetchWise (ai),
+Helion/Fylecoin (depin), Arbitrix/Optimus (layer2), Ondine (rwa), Lidus (liquid-staking),
+Binex Coin (exchange), plus depth in the existing buckets (Avalon platform, Bonko meme, Silvercoin
+store-of-value). That takes the universe from 20 → 36 coins and 7 → 15 archetypes.
+
+Source of truth is `scripts/build_seed.py` (`CRYPTO_DEFS`); added one `.extend([...])` block and
+regenerated the seed JSON deterministically (`python scripts/build_seed.py`, seed unchanged at
+20260614 — stocks/bonds rebuilt byte-identical). The engine only consumes the numeric fields
+(`fair_value`, `volatility`, `fundamental_strength`, `circulating_supply`); `archetype` is a pure
+display label (cli.py / models.py), so the new categories needed no engine work. Respected the one
+seed invariant — every non-stablecoin coin keeps volatility ≥ 0.5 (test_seed.py).
+
+One test needed a fix: `test_tui.py::test_tui_smoke` asserted the crypto board fit on a single 25-row
+page (no "Next" row) — true at 12/20 coins, false at 36. Pointed that "small view → no Next row"
+assertion at the bonds board (22, still one page) to preserve its intent. Full suite: **75 pass**.
+Verified the coins load and render: 36 across 15 archetypes, new ones show correct fv/vol.
+
+Committed the crypto seed (`build_seed.py`, `crypto.json`, `test_tui.py`) on top of Matthew's staged
+coin WIP. Left the separate TUI default-max-quantity WIP in `tui.py` untouched (still Matthew's).
+Commit is local — not pushed.
