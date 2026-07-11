@@ -188,3 +188,30 @@ def test_position_rows_after_buy():
     assert r[2] > 0                                     # signed qty (long)
     assert abs(r[4] - qty * world.price(aid)) < 1e-6   # value = qty * price
     assert abs(r[5]) < 1e-6                             # unrealized pnl ~0 right after buy
+
+
+def test_movers_ids_and_ticker_text():
+    from trader_pro.gui.model import movers_ids, ticker_text
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    trader = TraderApp(world, universe=uni)
+    trader._advance(2 * 1440)                           # let prices move
+    m = movers_ids(world, trader.engine, n=8)
+    assert m == list(dict.fromkeys(m))                  # deduped, order preserved
+    assert all(world.has_asset(a) for a in m)
+    tape = ticker_text(world, trader.engine, default_watchlist(world))
+    assert ("▲" in tape or "▼" in tape) and len(tape) > 0
+
+
+def test_event_and_closure_entry():
+    from trader_pro.core import ExecutionResult, MarketEvent, Order, OrderSide
+    from trader_pro.gui.model import closure_entry, event_entry
+    up = MarketEvent(100, "earnings", "asset", "STOCK:AAPL", 0.05, 1440.0, "AAPL beats")
+    text, color = event_entry(up)
+    assert "AAPL beats" in text and color == GREEN
+    dn = MarketEvent(100, "earnings", "asset", "STOCK:AAPL", -0.05, 1440.0, "AAPL misses")
+    assert event_entry(dn)[1] == RED
+    res = ExecutionResult(True, Order("CRYPTO:BTR", OrderSide.BUY, 0.5), price=60000.0,
+                          realized_pnl=-100.0)
+    ctext, ccolor = closure_entry(res)
+    assert "MARGIN CALL" in ctext and "BTR" in ctext and ccolor == RED

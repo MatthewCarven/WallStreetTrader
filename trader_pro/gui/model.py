@@ -370,3 +370,43 @@ def position_rows(world) -> list:
                   if pos.avg_cost else 0.0)
         rows.append((aid, aid.split(":", 1)[1], qty, pos.avg_cost, qty * price, pnl, pnlpct))
     return rows
+
+
+def movers_ids(world, engine, n: int = 12) -> list:
+    """Top-n 1D% gainers then top-n losers across the whole market, deduped — the 'movers' board
+    view. Mirrors the TUI's _movers (tui.py:727)."""
+    rows = sorted(((chg_pct(world, engine, aid, 1), aid) for aid in world.asset_ids()),
+                  reverse=True)
+    ordered = [aid for _, aid in rows[:n]] + [aid for _, aid in reversed(rows[-n:])]
+    seen, out = set(), []
+    for aid in ordered:
+        if aid not in seen:
+            seen.add(aid)
+            out.append(aid)
+    return out
+
+
+def ticker_text(world, engine, watch) -> str:
+    """The scrolling ticker-tape string: watchlist symbol · price · 1D% arrow. Mirrors _build_ticker."""
+    segs = []
+    for aid in watch[:18]:
+        if not world.has_asset(aid):
+            continue
+        chg = chg_pct(world, engine, aid, 1)
+        segs.append(f"{aid.split(':', 1)[1]} {world.price(aid):,.2f} "
+                    f"{'▲' if chg >= 0 else '▼'}{abs(chg):.1f}%")
+    return "        ".join(segs) + "        " if segs else ""
+
+
+def event_entry(event) -> tuple:
+    """(text, colour) for one market event in the news feed. Green if it pushed prices up."""
+    up = event.severity >= 0
+    return (f"{fmt_clock(event.fire_tick)}  {'▲' if up else '▼'} {event.headline}",
+            GREEN if up else RED)
+
+
+def closure_entry(closure) -> tuple:
+    """(text, colour) for a forced margin liquidation in the news feed."""
+    c = closure
+    return (f"⚠ MARGIN CALL — closed {c.order.quantity:g} {c.order.asset_id.split(':', 1)[1]} "
+            f"@ {money(c.price)} (P&L {c.realized_pnl:+,.2f})", RED)

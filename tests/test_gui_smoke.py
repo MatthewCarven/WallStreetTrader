@@ -184,6 +184,18 @@ _SMOKE = textwrap.dedent(
     assert gui.positions_model.rowCount() >= 1             # the open position shows
     assert "Positions" in gui.pos_summary.text()
 
+    # --- Slice 8: news feed, ticker, movers ---
+    from trader_pro.core import MarketEvent
+    assert gui.news.count() >= 1                           # welcome line at least
+    gui._log_news([MarketEvent(1, "earnings", "asset", "STOCK:AAPL", 0.05, 1440.0, "AAPL pops")], [])
+    assert gui.news.item(0).text().endswith("AAPL pops")   # newest on top
+    gui._build_ticker(); gui._scroll_ticker()
+    assert len(gui.ticker.text()) > 0                      # ticker has content
+    gui.view_movers()
+    assert gui.movers is True and gui.board_model.rowCount() > 0
+    gui.view_watch()
+    assert gui.movers is False
+
     print("SMOKE OK")
     """
 )

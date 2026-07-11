@@ -19,8 +19,8 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QDialog, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSplitter, QTableView,
-    QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
+    QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
@@ -30,8 +30,9 @@ from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
     PANEL, POSITION_COLUMNS, RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
-    default_watchlist, header_html, kind_ids, margin_call_message, margin_color, margin_fill,
-    position_rows, row_ctx, steps_for, trade_quantity, visible_ids,
+    closure_entry, default_watchlist, event_entry, header_html, kind_ids, margin_call_message,
+    margin_color, margin_fill, movers_ids, position_rows, row_ctx, steps_for, ticker_text,
+    trade_quantity, visible_ids,
 )
 
 
@@ -298,9 +299,12 @@ class TraderGUI(QMainWindow):
         self.view_label = "watchlist"
         self.owned_only = False
         self.sort_by_change = False
+        self.movers = False                         # top-movers board mode
         self.view_page = 0
         self.page_size = 25
         self.cursor_aid: str | None = None
+        self._ticker_base = ""
+        self._ticker_off = 0
         self.chart_range = 1                        # index into CHART_RANGES (default 1D)
         self._curve = None                          # created in _build_ui; guards early refresh
         self._equity_curve = None
@@ -333,6 +337,12 @@ class TraderGUI(QMainWindow):
         self.header_label.setTextFormat(Qt.RichText)
         self.header_label.setFont(mono)
         root.addWidget(self.header_label)
+
+        self.ticker = QLabel("")                     # amber scrolling marquee (scrolls in _on_timer)
+        self.ticker.setFont(mono)
+        self.ticker.setFixedHeight(22)
+        self.ticker.setStyleSheet(f"color: {AMBER}; background: #000000; padding: 1px 6px;")
+        root.addWidget(self.ticker)
 
         controls = QHBoxLayout()
         controls.setSpacing(6)
@@ -403,6 +413,7 @@ class TraderGUI(QMainWindow):
             ("2", "Stocks", "stocks", self.view_stocks),
             ("3", "Bonds", "bonds", self.view_bonds),
             ("4", "Watch", "watchlist", self.view_watch),
+            ("5", "Movers", "movers", self.view_movers),
         ):
             b = QPushButton(label)
             b.setCheckable(True)
@@ -549,11 +560,24 @@ class TraderGUI(QMainWindow):
         splitter.setSizes([680, 420])
         root.addWidget(splitter, 1)
 
+        self.news = QListWidget()                    # market story — newest on top
+        self.news.setFont(mono)
+        self.news.setMaximumHeight(140)
+        self.news.setSelectionMode(QAbstractItemView.NoSelection)
+        self.news.setFocusPolicy(Qt.NoFocus)
+        self.news.setStyleSheet(
+            f"QListWidget {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN}; }}")
+        root.addWidget(self.news)
+
         self._rebuild_board()
         self._refresh_chart()
         self._refresh_equity()
         self._refresh_detail()
         self._refresh_positions()
+        self._build_ticker()
+        self._log_line("Welcome to TRADER PRO — the market ticks live; news lands here.", GREEN_HI)
+        if self.resumed:
+            self._log_line("Resumed your last game.  (Ctrl+N for a new world lands in slice 9)", AMBER)
 
         self.setCentralWidget(central)
         self._apply_theme()
@@ -623,16 +647,18 @@ class TraderGUI(QMainWindow):
         """A discrete manual advance (Step / +1h / +1d) — jumps the market immediately, whether
         playing or paused, and never banks against the play clock. Mirrors the TUI's
         action_step/hour/day. Cheap even for +1d: the engine evaluates seeded anchors directly."""
-        _events, closures = self.trader._advance(ticks)   # events feed lands in slice 8
+        events, closures = self.trader._advance(ticks)
         self._refresh_header()
         self._refresh_board()
         self._refresh_chart()
         self._refresh_equity()
         self._refresh_positions()
+        self._log_news(events, closures)
         if closures:
             self._notify_margin_call(closures)
 
     def _on_timer(self) -> None:
+        self._scroll_ticker()                   # marquee scrolls even while paused
         if not self.playing:
             self._play_clock = None
             return
@@ -646,12 +672,13 @@ class TraderGUI(QMainWindow):
         steps, self._tick_accum = steps_for(elapsed, SPEEDS[self.speed_idx][1], self._tick_accum)
         if steps <= 0:                          # not a whole sim-minute yet; wait for more time
             return
-        _events, closures = self.trader._advance(steps)   # events feed lands in slice 8
+        events, closures = self.trader._advance(steps)
         self._refresh_header()
         self._refresh_board()
         self._refresh_chart()
         self._refresh_equity()
         self._refresh_positions()
+        self._log_news(events, closures)
         if self.autosave_enabled and now - self._last_autosave >= AUTOSAVE_SECS:
             self._autosave()
             self._last_autosave = now
@@ -662,6 +689,33 @@ class TraderGUI(QMainWindow):
         self.header_label.setText(header_html(self.trader.world))
         if self.margin_meter is not None:
             self.margin_meter.set_fill(margin_fill(self.trader.world))
+        self._build_ticker()
+
+    # ---- news feed & ticker ---- #
+
+    def _build_ticker(self) -> None:
+        self._ticker_base = ticker_text(self.trader.world, self.trader.engine, self.watch)
+
+    def _scroll_ticker(self) -> None:
+        base = self._ticker_base
+        if not base:
+            self.ticker.setText("")
+            return
+        self._ticker_off = (self._ticker_off + 1) % len(base)
+        self.ticker.setText(base[self._ticker_off:] + base[:self._ticker_off])
+
+    def _log_news(self, events, closures) -> None:
+        for ev in events:
+            self._log_line(*event_entry(ev))
+        for c in closures:                          # inserted last => shown on top (most recent)
+            self._log_line(*closure_entry(c))
+
+    def _log_line(self, text: str, color: str) -> None:
+        item = QListWidgetItem(text)
+        item.setForeground(QColor(color))
+        self.news.insertItem(0, item)               # newest on top
+        while self.news.count() > 200:
+            self.news.takeItem(self.news.count() - 1)
 
     def _refresh_board(self) -> None:
         self.board_model.refresh()
@@ -683,10 +737,19 @@ class TraderGUI(QMainWindow):
     def view_watch(self) -> None:
         self._set_view(None, "watchlist")
 
+    def view_movers(self) -> None:
+        self.movers = True
+        self.view_label = "movers"
+        self.owned_only = False
+        self.view_page = 0
+        self.view_btns["movers"].setChecked(True)
+        self._rebuild_board()
+
     def _set_view(self, source, label: str, *, owned_only: bool = False) -> None:
         self.view_source = source
         self.view_label = label
         self.owned_only = owned_only
+        self.movers = False
         self.view_page = 0
         if label in self.view_btns:
             self.view_btns[label].setChecked(True)
@@ -710,11 +773,14 @@ class TraderGUI(QMainWindow):
         """Recompute which asset ids the board shows (view / sort / page changed) and reset the
         model. Live per-tick updates use _refresh_board() instead, which repaints values in place
         without reordering — so rows stay stable and clickable while playing."""
-        ids, label = visible_ids(
-            self.trader.world, self.trader.engine, view_source=self.view_source,
-            owned_only=self.owned_only, sort_by_change=self.sort_by_change,
-            watch=self.watch, view_page=self.view_page, page_size=self.page_size,
-        )
+        if self.movers:
+            ids, label = movers_ids(self.trader.world, self.trader.engine), None
+        else:
+            ids, label = visible_ids(
+                self.trader.world, self.trader.engine, view_source=self.view_source,
+                owned_only=self.owned_only, sort_by_change=self.sort_by_change,
+                watch=self.watch, view_page=self.view_page, page_size=self.page_size,
+            )
         self.board_model.set_aids(ids)
         self._restore_selection(ids)
         self.page_label.setText(label or "")
