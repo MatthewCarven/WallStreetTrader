@@ -838,6 +838,28 @@ the holding throughout. Full suite: 84 pass.
 Committed as `145b4b9`. Next: slice 7 (positions & margin health — the positions table plus the
 blue→red margin meter and margin-call popup Matthew asked for).
 
+## 2026-07-11 — GUI (V2): Slice 7 (first half) — margin meter + margin-call popup
+
+Did the half of slice 7 Matthew most wanted, then stopped mid-slice (usage budget) — the positions
+table is the clean other half for next session. The controls row now carries a compact painted
+`[▮▮▮░░]` `MarginMeter`: blue when all cash, amber at ~half (buying power exhausted, gross = 2× equity),
+red at full (the margin-call line, gross = 4× equity / `maintenance_excess <= 0`). Fill =
+`MAINTENANCE_MARGIN_RATIO * gross / equity` (pure `model.margin_fill`); colour lerps blue→amber→red
+(`model.margin_color`). It refreshes whenever the header does (tick, trade, step).
+
+The popup: `_advance` now returns its forced-liquidation closures (previously discarded); when
+non-empty the GUI **pauses play** and shows a `QMessageBox` listing exactly what the broker force-sold,
+at what price, and the realized hit (`model.margin_call_message`) — a margin call becomes a
+stop-and-look moment instead of a blink-and-miss mid-autoplay.
+
+Verified: pure tests (`margin_fill` 0 when all cash; `margin_color` blue-at-empty / red-at-full;
+`margin_call_message` content); a smoke check that a 2× max-buy lifts the meter off zero; and an
+offscreen render confirming the meter paints half-amber at 2× leverage (fill 0.50, rgb (255,176,0)).
+Full suite: 86 pass.
+
+Committed as `0e67757`. **Slice 7 is half done** — next session: the positions table (signed qty /
+avg cost / value / unrealized P&L / P&L %) + a portfolio summary line, then slices 8–10.
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
