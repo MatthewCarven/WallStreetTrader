@@ -17,9 +17,10 @@ the build history.
 
 **V1 — feature-complete local single-player.** Four asset classes, longs / shorts /
 2:1 margin with margin calls, 8 market "personalities", a seeded event system with
-black-swan cascades, loans, buyable price predictions, brokerage fees, save/load, and two
-front-ends: a plain CLI and a live retro **TUI**. V2 (web) and V3 (multiplayer) are
-designed but not built — see the roadmap in `design.md` §9.
+black-swan cascades, loans, buyable price predictions, brokerage fees, save/load, and three
+front-ends: a plain CLI, a live retro **TUI**, and a **PySide6 desktop GUI** (the TUI and GUI are at
+feature parity). V2 web and V3 (multiplayer) are designed but not built — see the roadmap in
+`design.md` §9.
 
 ## Quick start
 
@@ -70,6 +71,25 @@ written atomically (a crash mid-save can't corrupt a slot).
 > Textual, downgrade with `pip install "textual<0.72"`. `play_tui.py` now **checks this on
 > startup** and refuses to launch (with the fix command) on >= 0.72, rather than letting you
 > hit the freeze mid-game.
+
+### Desktop GUI (PySide6)
+
+```bash
+pip install PySide6 pyqtgraph
+python play_gui.py              # or:  python -m trader_pro.gui
+```
+
+A native desktop client over the same engine, at feature parity with the TUI. A live market board
+(views · sort · paging · click-to-select), a real-time price chart (1H/1D/3D/1W) beside a net-worth
+equity curve and asset fundamentals, a positions table, a **blue→amber→red margin-risk meter** plus a
+margin-call popup, a news feed + scrolling ticker + top-movers, a save/load browser and a new-world
+dialog (**Game** menu · `Ctrl+N` / `Ctrl+S` / `Ctrl+L`), a predictions dialog, a fees menu, and a `:`
+command line that runs every CLI command. The keys match the TUI table above; **`Enter` or
+double-click** a row to trade, `?` for help. It resumes your last game and autosaves exactly like the
+TUI (they share the `saves/` slots).
+
+> PySide6 ships stable-ABI wheels, so it installs on current Pythons (including 3.14). It's an
+> optional extra — the core game, CLI and TUI don't need it.
 
 ## Commands
 

@@ -920,6 +920,25 @@ live round-trip — saved (net worth $4,790.30, tick 2880, 1 position) → swapp
 Committed as `99cfd3f`. **9 of 11 slices done.** Last one: slice 10 (buyable predictions, loans/repay,
 fee-level selector, plus a `:` command line and theming/help polish) → full TUI parity.
 
+## 2026-07-12 — GUI (V2): Slice 10 — predictions, loans, fees, command line → FULL PARITY
+
+The final slice. A `PredictDialog` (Predict button) buys a forecast for the highlighted asset via
+`quote_cost` / `make_prediction` — horizon dropdown, live cost, result summarised by the pure
+`model.prediction_summary`, cost deducted from cash. A **Fees** submenu (Game menu) sets the world's
+`fee_level`. And the big parity lever: a **`:` command line** that reuses `TraderApp.execute(line)`, so
+*every* CLI command works from the GUI — predict, loan, repay, fees, find, look, market, run,
+buy/sell/short/cover — with the result (ANSI-stripped) echoed into the news feed and every panel
+repainted. A `?` Help dialog documents the keys and the command set.
+
+That closes out **full TUI parity**: every keybinding and command in the README table now has a GUI
+equivalent. Verified with a pure `prediction_summary` test, predictions/fees/command-line assertions in
+the offscreen smoke, and a live command-line session — `buy $1000` / `loan 2000` / `predict 1d`
+($56, 62% confidence) / `fees high` / `repay all` — cash and loan balance tracked exactly, each command
+echoed to the feed. Full suite: 91 pass.
+
+Committed as `bd214d0`. **The PySide6 desktop GUI is complete — all 11 slices (0–10) done, at TUI
+parity.** `python play_gui.py`. Front-end count is now three (CLI · Textual TUI · PySide6 GUI).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
