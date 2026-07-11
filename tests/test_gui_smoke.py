@@ -95,6 +95,29 @@ _SMOKE = textwrap.dedent(
     gui._refresh_board()                                  # live repaint keeps the model consistent
     assert gui.board_model.rowCount() > 0
 
+    # --- Slice 3: board interaction (views / sort / paging / selection) ---
+    from trader_pro.core import AssetKind
+    gui.view_crypto()
+    assert gui.board_model.rowCount() > 0
+    assert all(gui.trader.world.kind_of(a) is AssetKind.CRYPTO for a in gui.board_model.aids)
+    gui.view_stocks()
+    assert all(gui.trader.world.kind_of(a) is AssetKind.STOCK for a in gui.board_model.aids)
+    assert gui.board_model.rowCount() == 25               # one page of stocks
+    page0 = list(gui.board_model.aids)
+    gui.next_page()
+    assert gui.view_page == 1 and list(gui.board_model.aids) != page0
+    gui.view_owned()
+    assert gui.board_model.rowCount() == 0                # nothing held on a fresh world
+    gui.view_watch()
+    assert gui.board_model.rowCount() > 0
+    # row selection drives cursor_aid + the highlighted-asset label
+    gui.board.selectRow(0)
+    assert gui.cursor_aid == gui.board_model.aid_at(0) and ":" in gui.cursor_aid
+    assert gui.selected_label.text().startswith("▶")
+    # sort toggles cleanly
+    gui.toggle_sort(); assert gui.sort_by_change is True
+    gui.toggle_sort(); assert gui.sort_by_change is False
+
     print("SMOKE OK")
     """
 )

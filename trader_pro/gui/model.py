@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import namedtuple
 
 from ..cli import TraderApp, fmt_clock, money
-from ..core import World, load_seed_universe
+from ..core import AssetKind, World, load_seed_universe
 from ..core.engine import DAY
 from ..persistence import autosave_path, has_autosave, load_game
 
@@ -193,8 +193,8 @@ def default_watchlist(world) -> list[str]:
 
 
 def board_ids(world) -> list[str]:
-    """The default board: held positions pinned on top, then the watchlist, deduped. A simple
-    stand-in for the TUI's _visible() — view switching / sorting / paging arrive in slice 3."""
+    """The default board: held positions pinned on top, then the watchlist, deduped. Equivalent to
+    `visible_ids(view_source=None, owned_only=False, sort_by_change=False)`."""
     held = [a for a in world.portfolio.positions if world.has_asset(a)]
     seen, out = set(), []
     for aid in held + default_watchlist(world):
@@ -202,3 +202,46 @@ def board_ids(world) -> list[str]:
             seen.add(aid)
             out.append(aid)
     return out
+
+
+def kind_ids(world, kind: AssetKind) -> list[str]:
+    """All asset ids of a given kind (STOCK / CRYPTO / BOND). Mirrors the TUI's _kind_ids."""
+    return [a for a in world.asset_ids() if world.kind_of(a) is kind]
+
+
+def visible_ids(world, engine, *, view_source, owned_only, sort_by_change, watch,
+                view_page, page_size) -> tuple[list[str], str | None]:
+    """Which asset ids the board should show, plus an optional 'next page' label. A faithful port
+    of the TUI's _visible() (tui.py:763): held positions of the current view pin to the top, then
+    one page of `page_size` unheld candidates. `sort_by_change` orders candidates by 1D % desc.
+    `view_source` None means the default holdings+watchlist view (no paging)."""
+    pf = world.portfolio
+    held = [a for a in pf.positions if world.has_asset(a)]
+    by_change = lambda aid: chg_pct(world, engine, aid, 1)
+
+    if owned_only:
+        return (sorted(held, key=by_change, reverse=True) if sort_by_change else held), None
+
+    if view_source is None:
+        seen, out = set(), []
+        for aid in held + watch:
+            if aid not in seen and world.has_asset(aid):
+                seen.add(aid)
+                out.append(aid)
+        if sort_by_change:
+            out = sorted(out, key=by_change, reverse=True)
+        return out, None
+
+    src = set(view_source)
+    held = [a for a in held if a in src]
+    owned = set(held)
+    cands = [a for a in view_source if a not in owned and world.has_asset(a)]
+    if sort_by_change:
+        cands = sorted(cands, key=by_change, reverse=True)
+    if not cands:
+        return held, None
+    total = (len(cands) + page_size - 1) // page_size
+    page = view_page % total
+    page_ids = cands[page * page_size:(page + 1) * page_size]
+    label = f"page {page + 1}/{total}" if total > 1 else None
+    return held + page_ids, label

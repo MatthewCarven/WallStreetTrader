@@ -1,8 +1,9 @@
 """Pure unit tests for the GUI's Qt-free helpers (no PySide6 needed)."""
 from trader_pro.cli import TraderApp
-from trader_pro.core import World, load_seed_universe
+from trader_pro.core import AssetKind, World, load_seed_universe
 from trader_pro.gui.model import (
-    AMBER, DIM, GREEN, RED, RowCtx, board_ids, boot, cell, header_html, row_ctx, steps_for,
+    AMBER, DIM, GREEN, RED, RowCtx, board_ids, boot, cell, chg_pct, default_watchlist,
+    header_html, kind_ids, row_ctx, steps_for, visible_ids,
 )
 
 
@@ -72,3 +73,51 @@ def test_cell_short_position_colours():
     assert cell(short, "pos").color == AMBER
     assert cell(short, "value").color == RED
     assert cell(short, "pnl").text == "+10.00%" and cell(short, "pnl").color == GREEN
+
+
+def test_kind_ids_filters_by_kind():
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    crypto = kind_ids(world, AssetKind.CRYPTO)
+    assert crypto and all(world.kind_of(a) is AssetKind.CRYPTO for a in crypto)
+    assert len(kind_ids(world, AssetKind.STOCK)) > 25          # big enough to page
+
+
+def test_visible_ids_views_and_paging():
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    eng = TraderApp(world, universe=uni).engine
+    watch = default_watchlist(world)
+
+    # watchlist view (source None): the deduped watch, no page label, nothing held
+    ids, label = visible_ids(world, eng, view_source=None, owned_only=False,
+                             sort_by_change=False, watch=watch, view_page=0, page_size=25)
+    assert ids == watch and label is None
+
+    # owned view: empty on a fresh world
+    ids, label = visible_ids(world, eng, view_source=None, owned_only=True,
+                             sort_by_change=False, watch=watch, view_page=0, page_size=25)
+    assert ids == [] and label is None
+
+    # stocks view: a page of 25 with a page label; page 1 differs from page 0
+    stocks = kind_ids(world, AssetKind.STOCK)
+    ids0, label0 = visible_ids(world, eng, view_source=stocks, owned_only=False,
+                               sort_by_change=False, watch=watch, view_page=0, page_size=25)
+    ids1, _ = visible_ids(world, eng, view_source=stocks, owned_only=False,
+                          sort_by_change=False, watch=watch, view_page=1, page_size=25)
+    assert len(ids0) == 25 and label0 is not None
+    assert ids1 != ids0
+
+
+def test_visible_ids_sort_orders_by_change_desc():
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    trader = TraderApp(world, universe=uni)
+    eng = trader.engine
+    trader._advance(3 * 1440)                                   # a few days so 1D % varies
+    watch = default_watchlist(world)
+    stocks = kind_ids(world, AssetKind.STOCK)
+    ids, _ = visible_ids(world, eng, view_source=stocks, owned_only=False,
+                         sort_by_change=True, watch=watch, view_page=0, page_size=25)
+    chgs = [chg_pct(world, eng, a, 1) for a in ids]
+    assert chgs == sorted(chgs, reverse=True)

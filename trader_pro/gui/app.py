@@ -17,17 +17,27 @@ import time
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-    QPushButton, QTableView, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QButtonGroup, QHBoxLayout, QHeaderView, QLabel,
+    QMainWindow, QPushButton, QTableView, QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
+from ..core import AssetKind
 from ..core.engine import DAY, HOUR
 from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, DIM, FG, GREEN, GREEN_HI, PANEL, SPEEDS,
-    TIMER_MS, board_ids, boot, cell, header_html, row_ctx, steps_for,
+    TIMER_MS, boot, cell, default_watchlist, header_html, kind_ids, row_ctx, steps_for,
+    visible_ids,
 )
+
+
+class BoardView(QTableView):
+    """The board table. Type-ahead row search is disabled so single-letter shortcuts (0-4 views,
+    `o` sort, `s`/`h`/`d` steps) reach their buttons instead of being swallowed as search keys."""
+
+    def keyboardSearch(self, search: str) -> None:   # noqa: N802 — Qt override name
+        pass
 
 
 class BoardModel(QAbstractTableModel):
@@ -109,6 +119,16 @@ class TraderGUI(QMainWindow):
         self._tick_accum = 0.0                   # carries fractional sim-minutes across timer ticks
         self._last_autosave = time.monotonic()
 
+        # board view state (mirrors the TUI): which slice of the market, sort, paging, selection
+        self.watch = default_watchlist(trader.world)
+        self.view_source: list[str] | None = None   # None => holdings + watchlist
+        self.view_label = "watchlist"
+        self.owned_only = False
+        self.sort_by_change = False
+        self.view_page = 0
+        self.page_size = 25
+        self.cursor_aid: str | None = None
+
         self.setWindowTitle("TRADER PRO")
         self.resize(1120, 720)
         self._build_ui()
@@ -185,8 +205,58 @@ class TraderGUI(QMainWindow):
         controls.addWidget(self.state_label)
         root.addLayout(controls)
 
+        # view toolbar — which slice of the market to show, sort, paging, and the highlighted asset
+        views = QHBoxLayout()
+        views.setSpacing(4)
+        self.view_group = QButtonGroup(self)
+        self.view_group.setExclusive(True)
+        self.view_btns: dict[str, QPushButton] = {}
+        for key, label, slug, handler in (
+            ("0", "Owned", "owned", self.view_owned),
+            ("1", "Crypto", "crypto", self.view_crypto),
+            ("2", "Stocks", "stocks", self.view_stocks),
+            ("3", "Bonds", "bonds", self.view_bonds),
+            ("4", "Watch", "watchlist", self.view_watch),
+        ):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setShortcut(key)
+            b.setToolTip(f"{label}  ({key})")
+            b.clicked.connect(handler)
+            self.view_group.addButton(b)
+            self.view_btns[slug] = b
+            views.addWidget(b)
+        self.view_btns["watchlist"].setChecked(True)
+
+        views.addSpacing(14)
+        self.sort_btn = QPushButton("Sort 1D%")
+        self.sort_btn.setCheckable(True)
+        self.sort_btn.setShortcut("o")
+        self.sort_btn.setToolTip("Sort by 1D % (toggle)  (o)")
+        self.sort_btn.clicked.connect(self.toggle_sort)
+        views.addWidget(self.sort_btn)
+
+        views.addSpacing(14)
+        self.prev_btn = QPushButton("◂")
+        self.prev_btn.setToolTip("Previous page")
+        self.prev_btn.clicked.connect(self.prev_page)
+        views.addWidget(self.prev_btn)
+        self.page_label = QLabel("")
+        self.page_label.setFont(mono)
+        views.addWidget(self.page_label)
+        self.next_btn = QPushButton("▸")
+        self.next_btn.setToolTip("Next page")
+        self.next_btn.clicked.connect(self.next_page)
+        views.addWidget(self.next_btn)
+
+        views.addStretch(1)
+        self.selected_label = QLabel("")
+        self.selected_label.setFont(mono)
+        views.addWidget(self.selected_label)
+        root.addLayout(views)
+
         self.board_model = BoardModel(self.trader)
-        self.board = QTableView()
+        self.board = BoardView()
         self.board.setModel(self.board_model)
         self.board.setFont(mono)
         self.board.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -198,8 +268,9 @@ class TraderGUI(QMainWindow):
         self.board.horizontalHeader().setHighlightSections(False)
         self.board.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.board.horizontalHeader().setStretchLastSection(True)
+        self.board.selectionModel().currentRowChanged.connect(self._on_row_changed)
         root.addWidget(self.board, 1)
-        self.board_model.set_aids(board_ids(self.trader.world))
+        self._rebuild_board()
 
         self.setCentralWidget(central)
         self._apply_theme()
@@ -299,6 +370,84 @@ class TraderGUI(QMainWindow):
 
     def _refresh_board(self) -> None:
         self.board_model.refresh()
+
+    # ---- board views / sort / paging / selection ---- #
+
+    def view_owned(self) -> None:
+        self._set_view(None, "owned", owned_only=True)
+
+    def view_crypto(self) -> None:
+        self._set_view(kind_ids(self.trader.world, AssetKind.CRYPTO), "crypto")
+
+    def view_stocks(self) -> None:
+        self._set_view(kind_ids(self.trader.world, AssetKind.STOCK), "stocks")
+
+    def view_bonds(self) -> None:
+        self._set_view(kind_ids(self.trader.world, AssetKind.BOND), "bonds")
+
+    def view_watch(self) -> None:
+        self._set_view(None, "watchlist")
+
+    def _set_view(self, source, label: str, *, owned_only: bool = False) -> None:
+        self.view_source = source
+        self.view_label = label
+        self.owned_only = owned_only
+        self.view_page = 0
+        if label in self.view_btns:
+            self.view_btns[label].setChecked(True)
+        self._rebuild_board()
+
+    def toggle_sort(self) -> None:
+        self.sort_by_change = not self.sort_by_change
+        self.sort_btn.setChecked(self.sort_by_change)
+        self.view_page = 0
+        self._rebuild_board()
+
+    def next_page(self) -> None:
+        self.view_page += 1
+        self._rebuild_board()
+
+    def prev_page(self) -> None:
+        self.view_page = max(0, self.view_page - 1)
+        self._rebuild_board()
+
+    def _rebuild_board(self) -> None:
+        """Recompute which asset ids the board shows (view / sort / page changed) and reset the
+        model. Live per-tick updates use _refresh_board() instead, which repaints values in place
+        without reordering — so rows stay stable and clickable while playing."""
+        ids, label = visible_ids(
+            self.trader.world, self.trader.engine, view_source=self.view_source,
+            owned_only=self.owned_only, sort_by_change=self.sort_by_change,
+            watch=self.watch, view_page=self.view_page, page_size=self.page_size,
+        )
+        self.board_model.set_aids(ids)
+        self._restore_selection(ids)
+        self.page_label.setText(label or "")
+        self.next_btn.setEnabled(label is not None)
+        self.prev_btn.setEnabled(self.view_page > 0)
+
+    def _restore_selection(self, ids) -> None:
+        if self.cursor_aid in ids:
+            self.board.selectRow(ids.index(self.cursor_aid))
+        elif ids:
+            self.board.selectRow(0)
+        else:
+            self.cursor_aid = None
+            self._update_selected_label()
+
+    def _on_row_changed(self, current, _previous) -> None:
+        self.cursor_aid = self.board_model.aid_at(current.row())
+        self._update_selected_label()
+
+    def _update_selected_label(self) -> None:
+        w = self.trader.world
+        aid = self.cursor_aid
+        if aid and w.has_asset(aid):
+            self.selected_label.setText(
+                f"▶ {aid.split(':', 1)[1]}  {w.name_of(aid)} · {w.kind_of(aid).name.title()}"
+            )
+        else:
+            self.selected_label.setText("")
 
     # ---- persistence ---- #
 
