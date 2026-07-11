@@ -196,6 +196,26 @@ _SMOKE = textwrap.dedent(
     gui.view_watch()
     assert gui.movers is False
 
+    # --- Slice 9: save / load / new world ---
+    import tempfile
+    from trader_pro.core import World as _World
+    from trader_pro.gui.app import LoadDialog, NewWorldDialog
+    from trader_pro.persistence import save_game as _sg, slot_path as _sp
+    # new-world swap: fresh world (tick 0), view reset to watchlist, news cleared + seeded
+    gui.trader.start_world(_World.new(gui.trader.universe, world_seed=777, profile="Calm",
+                                      starting_cash=8000.0))
+    gui._after_world_swap("New world 777")
+    assert gui.trader.world.config.world_seed == 777 and gui.trader.world.market.tick_index == 0
+    assert gui.movers is False and gui.view_label == "watchlist" and gui.news.count() >= 1
+    # NewWorldDialog builds a (seed, profile, cash, fee) config
+    nd = NewWorldDialog(); nd.seed.setText("123"); nd.cash.setText("2500"); nd._accept()
+    assert nd.config[0] == 123 and nd.config[2] == 2500.0
+    # LoadDialog lists a saved slot
+    tmp = tempfile.mkdtemp()
+    _sg(gui.trader.world, _sp("smoke_slot", tmp), label="smoke_slot")
+    ld = LoadDialog(tmp)
+    assert "smoke_slot" in [ld.list.item(i).data(Qt.UserRole) for i in range(ld.list.count())]
+
     print("SMOKE OK")
     """
 )

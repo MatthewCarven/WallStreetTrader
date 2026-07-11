@@ -11,6 +11,7 @@ board, charts, positions, news and trading dialogs arrive in later slices. Requi
 """
 from __future__ import annotations
 
+import random
 import sys
 import time
 
@@ -18,21 +19,26 @@ import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QDialog, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPushButton,
-    QSplitter, QTableView, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog, QDialogButtonBox,
+    QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter, QTableView,
+    QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
-from ..core import AssetKind, Order, OrderSide, execute_order
+from ..core import AssetKind, Order, OrderSide, PROFILE_NAMES, World, execute_order, get_profile
 from ..core.engine import DAY, HOUR
-from ..persistence import AUTOSAVE_SLOT, autosave_path, save_game
+from ..core.orders import FEE_LEVELS
+from ..persistence import (
+    AUTOSAVE_SLOT, SAVES_DIR, autosave_path, delete_save, list_saves, load_game, save_game,
+    slot_path,
+)
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
     PANEL, POSITION_COLUMNS, RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
     closure_entry, default_watchlist, event_entry, header_html, kind_ids, margin_call_message,
-    margin_color, margin_fill, movers_ids, position_rows, row_ctx, steps_for, ticker_text,
-    trade_quantity, visible_ids,
+    margin_color, margin_fill, movers_ids, position_rows, row_ctx, save_info_line, steps_for,
+    ticker_text, trade_quantity, visible_ids,
 )
 
 
@@ -277,6 +283,127 @@ class TradeDialog(QDialog):
         self.msg.setText(f'<span style="color:{color}">{text}</span>')
 
 
+class LoadDialog(QDialog):
+    """Browse the save slots (persistence.list_saves) — Load or Delete. On accept, self.chosen is
+    the slot name to load."""
+
+    def __init__(self, saves_dir, parent=None):
+        super().__init__(parent)
+        self.saves_dir = saves_dir
+        self.chosen = None
+        self.setWindowTitle("Saved games")
+        self.setModal(True)
+        self.setMinimumSize(560, 340)
+        mono = QFont("Consolas")
+        mono.setStyleHint(QFont.Monospace)
+        mono.setPointSize(10)
+
+        layout = QVBoxLayout(self)
+        self.list = QListWidget()
+        self.list.setFont(mono)
+        self.list.itemDoubleClicked.connect(lambda _item: self._load())
+        layout.addWidget(self.list, 1)
+        buttons = QHBoxLayout()
+        load_b = QPushButton("Load")
+        load_b.clicked.connect(self._load)
+        del_b = QPushButton("Delete")
+        del_b.clicked.connect(self._delete)
+        close_b = QPushButton("Close")
+        close_b.clicked.connect(self.reject)
+        buttons.addWidget(load_b)
+        buttons.addWidget(del_b)
+        buttons.addStretch(1)
+        buttons.addWidget(close_b)
+        layout.addLayout(buttons)
+        self.setStyleSheet(
+            f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
+            f"QListWidget {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN}; }}"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f" padding: 5px 14px; border-radius: 4px; }}"
+        )
+        self._fill()
+
+    def _fill(self):
+        self.list.clear()
+        for info in list_saves(self.saves_dir):
+            item = QListWidgetItem(save_info_line(info))
+            item.setData(Qt.UserRole, info.name)
+            if info.corrupt:
+                item.setForeground(QColor(RED))
+            self.list.addItem(item)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+
+    def _name(self):
+        item = self.list.currentItem()
+        return item.data(Qt.UserRole) if item else None
+
+    def _load(self):
+        name = self._name()
+        if name:
+            self.chosen = name
+            self.accept()
+
+    def _delete(self):
+        name = self._name()
+        if name:
+            delete_save(name, self.saves_dir)
+            self._fill()
+
+
+class NewWorldDialog(QDialog):
+    """Configure a new world. On accept, self.config = (seed, profile, starting_cash, fee_level)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.config = None
+        self.setWindowTitle("New world")
+        self.setModal(True)
+        self.setMinimumWidth(440)
+        mono = QFont("Consolas")
+        mono.setStyleHint(QFont.Monospace)
+        mono.setPointSize(10)
+
+        form = QFormLayout(self)
+        self.profile = QComboBox()
+        for name in PROFILE_NAMES:
+            self.profile.addItem(f"{name} — {get_profile(name).tagline}", name)
+        self.profile.setCurrentIndex(PROFILE_NAMES.index("Normal"))
+        self.seed = QLineEdit(str(random.randint(1, 99_999_999)))
+        self.cash = QLineEdit("5000")
+        self.fee = QComboBox()
+        self.fee.addItems(FEE_LEVELS)
+        for widget in (self.profile, self.seed, self.cash, self.fee):
+            widget.setFont(mono)
+        form.addRow("Profile", self.profile)
+        form.addRow("World seed", self.seed)
+        form.addRow("Starting cash $", self.cash)
+        form.addRow("Fees", self.fee)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self._accept)
+        bb.rejected.connect(self.reject)
+        form.addRow(bb)
+        self.setStyleSheet(
+            f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
+            f"QLineEdit, QComboBox {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f" padding: 4px; border-radius: 4px; }}"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f" padding: 5px 14px; border-radius: 4px; }}"
+        )
+
+    def _accept(self):
+        try:
+            seed = int(self.seed.text().strip())
+        except ValueError:
+            seed = random.randint(1, 99_999_999)
+        try:
+            cash = float(self.cash.text().strip().replace(",", "").lstrip("$"))
+        except ValueError:
+            cash = 5000.0
+        self.config = (seed, self.profile.currentData(), max(1.0, cash), self.fee.currentText())
+        self.accept()
+
+
 class TraderGUI(QMainWindow):
     """The main window: header, time controls and the live market board; more panels (chart,
     positions, news) land in later slices. Holds a `TraderApp` and advances it on a QTimer,
@@ -289,6 +416,8 @@ class TraderGUI(QMainWindow):
         self.playing = False
         self.speed_idx = 0                      # default: 1 sim-minute per real second
         self.autosave_enabled = True
+        self.slot = None                        # current manual save slot (Ctrl+S default)
+        self.saves_dir = SAVES_DIR
         self._play_clock: float | None = None   # monotonic ts of last advance; None while paused
         self._tick_accum = 0.0                   # carries fractional sim-minutes across timer ticks
         self._last_autosave = time.monotonic()
@@ -324,6 +453,17 @@ class TraderGUI(QMainWindow):
     # ---- layout ---- #
 
     def _build_ui(self) -> None:
+        game_menu = self.menuBar().addMenu("Game")
+        act_new = game_menu.addAction("New World")
+        act_new.setShortcut("Ctrl+N")
+        act_new.triggered.connect(self.action_new_world)
+        act_save = game_menu.addAction("Save…")
+        act_save.setShortcut("Ctrl+S")
+        act_save.triggered.connect(self.action_save)
+        act_load = game_menu.addAction("Saves / Load…")
+        act_load.setShortcut("Ctrl+L")
+        act_load.triggered.connect(self.action_load)
+
         central = QWidget(self)
         root = QVBoxLayout(central)
         root.setContentsMargins(16, 14, 16, 12)
@@ -592,6 +732,10 @@ class TraderGUI(QMainWindow):
             f" padding: 5px 16px; border-radius: 4px; }}"
             f"QPushButton:hover {{ border: 1px solid {GREEN_HI}; }}"
             f"QStatusBar {{ color: {AMBER}; }}"
+            f"QMenuBar {{ background: {PANEL}; color: {FG}; }}"
+            f"QMenuBar::item:selected {{ background: {GREEN}; color: {BG}; }}"
+            f"QMenu {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN}; }}"
+            f"QMenu::item:selected {{ background: {GREEN}; color: {BG}; }}"
             f"QTableView {{ background: {BG}; alternate-background-color: {PANEL}; color: {FG};"
             f" gridline-color: {PANEL}; selection-background-color: {GREEN};"
             f" selection-color: {BG}; border: 1px solid {PANEL}; outline: none; }}"
@@ -921,6 +1065,79 @@ class TraderGUI(QMainWindow):
         if self.playing:                            # a margin call is a stop-and-look moment
             self.toggle_play()
         QMessageBox.warning(self, "⚠  Margin Call", margin_call_message(closures))
+
+    # ---- save / load / new world ---- #
+
+    def action_save(self) -> None:
+        name, ok = QInputDialog.getText(self, "Save game", "Slot name:", text=self.slot or "manual")
+        name = name.strip()
+        if ok and name:
+            try:
+                save_game(self.trader.world, slot_path(name, self.saves_dir), label=name)
+                self.slot = name
+                self._log_line(f"Saved to '{name}'.", GREEN_HI)
+                self.statusBar().showMessage(f"Saved to '{name}'", 4000)
+            except Exception as exc:
+                self._log_line(f"Save failed: {exc}", RED)
+
+    def action_load(self) -> None:
+        self._timer.stop()
+        try:
+            dlg = LoadDialog(self.saves_dir, self)
+            accepted = dlg.exec()
+        finally:
+            self._play_clock = None
+            self._timer.start()
+        if accepted and dlg.chosen:
+            try:
+                world = load_game(slot_path(dlg.chosen, self.saves_dir), self.trader.universe)
+                self.trader.start_world(world)
+                self.slot = dlg.chosen
+                self._after_world_swap(f"Loaded '{dlg.chosen}'.")
+            except Exception as exc:
+                self._log_line(f"Load failed: {exc}", RED)
+
+    def action_new_world(self) -> None:
+        self._timer.stop()
+        try:
+            dlg = NewWorldDialog(self)
+            accepted = dlg.exec()
+        finally:
+            self._play_clock = None
+            self._timer.start()
+        if accepted and dlg.config:
+            seed, profile, cash, fee = dlg.config
+            world = World.new(self.trader.universe, world_seed=seed, profile=profile,
+                              starting_cash=cash, fee_level=fee)
+            self.trader.start_world(world)
+            self.slot = None
+            self._after_world_swap(f"New world · {profile} · seed {seed}")
+
+    def _after_world_swap(self, message: str) -> None:
+        """Reset the view to the default watchlist and repaint every panel for the swapped-in world
+        (used by both load and new-world)."""
+        self.movers = False
+        self.view_source = None
+        self.view_label = "watchlist"
+        self.owned_only = False
+        self.sort_by_change = False
+        self.view_page = 0
+        self.cursor_aid = None
+        self.watch = default_watchlist(self.trader.world)
+        self.view_btns["watchlist"].setChecked(True)
+        self.sort_btn.setChecked(False)
+        if self.playing:
+            self.toggle_play()
+        self.news.clear()
+        self._rebuild_board()
+        self._refresh_header()
+        self._refresh_chart()
+        self._refresh_equity()
+        self._refresh_detail()
+        self._refresh_positions()
+        self._build_ticker()
+        self._log_line(message, GREEN_HI)
+        self.statusBar().showMessage(message, 5000)
 
     # ---- persistence ---- #
 

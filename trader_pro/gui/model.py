@@ -410,3 +410,12 @@ def closure_entry(closure) -> tuple:
     c = closure
     return (f"⚠ MARGIN CALL — closed {c.order.quantity:g} {c.order.asset_id.split(':', 1)[1]} "
             f"@ {money(c.price)} (P&L {c.realized_pnl:+,.2f})", RED)
+
+
+def save_info_line(info) -> str:
+    """One-line summary of a save slot (persistence.SaveInfo) for the load browser."""
+    tag = "  (autosave)" if info.is_autosave else ""
+    if info.corrupt:
+        return f"{info.name}{tag}   — corrupt / unreadable"
+    return (f"{info.name}{tag}   net worth {money(info.net_worth)} ({info.return_pct:+.1f}%)   "
+            f"· {info.profile} · {info.saved_at}")

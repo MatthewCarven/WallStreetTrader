@@ -215,3 +215,15 @@ def test_event_and_closure_entry():
                           realized_pnl=-100.0)
     ctext, ccolor = closure_entry(res)
     assert "MARGIN CALL" in ctext and "BTR" in ctext and ccolor == RED
+
+
+def test_save_info_line(tmp_path):
+    from trader_pro.gui.model import save_info_line
+    from trader_pro.persistence import list_saves, save_game, slot_path
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    save_game(world, slot_path("mygame", tmp_path), label="mygame")
+    infos = list_saves(tmp_path)
+    assert infos
+    line = save_info_line(infos[0])
+    assert "mygame" in line and "net worth" in line and "Normal" in line
