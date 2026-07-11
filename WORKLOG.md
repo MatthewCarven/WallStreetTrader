@@ -756,6 +756,32 @@ coincide that early because both clamp to since-start, which is correct). Full s
 Committed as `03b0e64`. Next: slice 3 (board interaction — views / sort / selection / paging). WIP
 still unstaged (Matthew's).
 
+## 2026-07-11 — GUI (V2): Slice 3 — board interaction (views, sort, paging, selection)
+
+Made the board navigable. A view toolbar switches which slice of the market shows — Owned / Crypto /
+Stocks / Bonds / Watch (keys 0–4, exclusive checkable buttons) — with a Sort-1D% toggle (`o`) and
+prev/next paging for the big lists (stocks paginate 25 at a time with a "page n/m" label). Clicking a
+row sets the highlighted asset (`cursor_aid`) and shows its symbol/name/kind in a label on the toolbar
+— the hook the chart (slice 4), detail (slice 5) and trade dialog (slice 6) will read.
+
+Ported the TUI's `_visible()` and `_kind_ids` into pure helpers `model.visible_ids`/`kind_ids` (held
+pinned on top, unheld candidates paged, optional 1D% sort), so the selection logic is unit-tested with
+no Qt. `BoardView` subclasses `QTableView` and overrides `keyboardSearch` to a no-op — otherwise the
+table's type-ahead row search swallows single-letter keys before the 0–4 / `o` / `s` / `h` / `d`
+shortcuts can fire.
+
+One deliberate divergence from the TUI: the TUI re-runs `_visible()` on every repaint, so a sorted
+board reorders live each tick. In the GUI, live ticks call `_refresh_board()` (repaint values in
+place, order stable) and only view/sort/page changes rebuild + reorder — rows stay put and clickable
+while playing, which matters far more with a mouse than in a keyboard TUI. Selection is preserved by
+asset id across rebuilds.
+
+Verified: pure tests for `kind_ids` and `visible_ids` (watchlist / owned / paged-stocks / 1D%-sorted),
+plus board-interaction assertions in the offscreen subprocess smoke (switch to each view, page stocks,
+select a row → `cursor_aid` + label, toggle sort). Full suite: 81 pass.
+
+Committed as `e30677f`. Next: slice 4 (pyqtgraph price chart of the highlighted asset).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
