@@ -45,6 +45,7 @@ from .model import (
     margin_color, margin_fill, movers_ids, position_rows, prediction_summary, row_ctx,
     save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
 )
+from ..errlog import guard, setup_logging
 
 
 class MarginMeter(QWidget):
@@ -915,6 +916,7 @@ class TraderGUI(QMainWindow):
 
     # ---- live clock ---- #
 
+    @guard(context="play/pause")
     def toggle_play(self) -> None:
         self.playing = not self.playing
         self._play_clock = None                 # reset baseline so toggling can't bank/jump time
@@ -925,10 +927,12 @@ class TraderGUI(QMainWindow):
             self.play_btn.setText("▶  Play")
             self.state_label.setText("paused")
 
+    @guard(context="speed")
     def faster(self) -> None:
         self.speed_idx = min(len(SPEEDS) - 1, self.speed_idx + 1)
         self._update_speed()
 
+    @guard(context="speed")
     def slower(self) -> None:
         self.speed_idx = max(0, self.speed_idx - 1)
         self._update_speed()
@@ -939,12 +943,15 @@ class TraderGUI(QMainWindow):
         if self.playing:
             self.state_label.setText(f"playing · {label}")
 
+    @guard(context="step")
     def step_minute(self) -> None:
         self._advance_now(1)
 
+    @guard(context="step")
     def step_hour(self) -> None:
         self._advance_now(HOUR)
 
+    @guard(context="step")
     def step_day(self) -> None:
         self._advance_now(DAY)
 
@@ -962,6 +969,7 @@ class TraderGUI(QMainWindow):
         if closures:
             self._notify_margin_call(closures)
 
+    @guard(context="timer tick")
     def _on_timer(self) -> None:
         self._scroll_ticker()                   # marquee scrolls even while paused
         if not self.playing:
@@ -1119,6 +1127,7 @@ class TraderGUI(QMainWindow):
 
     # ---- price chart ---- #
 
+    @guard(context="chart range")
     def cycle_chart_range(self) -> None:
         self.chart_range = (self.chart_range + 1) % len(CHART_RANGES)
         self.range_btn.setText(f"Range: {CHART_RANGES[self.chart_range][0]}")
@@ -1197,6 +1206,7 @@ class TraderGUI(QMainWindow):
 
     # ---- trading ---- #
 
+    @guard(context="trade")
     def open_trade(self) -> None:
         aid = self.cursor_aid
         if not (aid and self.trader.world.has_asset(aid)):
@@ -1229,6 +1239,7 @@ class TraderGUI(QMainWindow):
 
     # ---- save / load / new world ---- #
 
+    @guard(context="save")
     def action_save(self) -> None:
         name, ok = QInputDialog.getText(self, "Save game", "Slot name:", text=self.slot or "manual")
         name = name.strip()
@@ -1241,6 +1252,7 @@ class TraderGUI(QMainWindow):
             except Exception as exc:
                 self._log_line(f"Save failed: {exc}", RED)
 
+    @guard(context="load")
     def action_load(self) -> None:
         self._timer.stop()
         try:
@@ -1258,6 +1270,7 @@ class TraderGUI(QMainWindow):
             except Exception as exc:
                 self._log_line(f"Load failed: {exc}", RED)
 
+    @guard(context="new world")
     def action_new_world(self) -> None:
         self._timer.stop()
         try:
@@ -1302,6 +1315,7 @@ class TraderGUI(QMainWindow):
 
     # ---- predictions / fees / command line / help ---- #
 
+    @guard(context="predict")
     def open_predict(self) -> None:
         aid = self.cursor_aid
         if not (aid and self.trader.world.has_asset(aid)):
@@ -1317,6 +1331,7 @@ class TraderGUI(QMainWindow):
             self._refresh_header()
             self._log_line(dlg.bought, AMBER)
 
+    @guard(context="fee")
     def set_fee(self, level: str) -> None:
         self.trader.world.config.fee_level = level
         self._log_line(f"Fees set to '{level}'.", GREEN_HI)
@@ -1325,6 +1340,7 @@ class TraderGUI(QMainWindow):
     def show_help(self) -> None:
         HelpDialog(self).exec()
 
+    @guard(context="command line")
     def _run_command(self) -> None:
         line = self.command_line.text().strip()
         self.command_line.clear()
@@ -1363,6 +1379,7 @@ class TraderGUI(QMainWindow):
 
 def run_gui() -> None:
     """Boot a world (resume last autosave or start fresh) and open the window — mirrors run_tui()."""
+    setup_logging()                             # silent error log + global uncaught-exception hooks
     trader, resumed = boot()
     app = QApplication.instance() or QApplication(sys.argv)
     window = TraderGUI(trader, resumed=resumed)

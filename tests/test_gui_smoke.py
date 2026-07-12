@@ -237,6 +237,20 @@ _SMOKE = textwrap.dedent(
     # help dialog builds
     assert HelpDialog().windowTitle().startswith("Trader")
 
+    # --- errlog guard: a slot whose body raises must be logged and NOT propagate ---
+    import trader_pro.errlog as _errlog
+    _errlog.setup_logging(os.path.join(tempfile.mkdtemp(), "smoke.log"), install_hooks=False)
+    _orig_refresh_chart = gui._refresh_chart
+    def _boom(*a, **k):
+        raise RuntimeError("boom-in-slot")
+    gui._refresh_chart = _boom
+    try:
+        gui.cycle_chart_range()            # @guard must swallow the RuntimeError, not crash the app
+    finally:
+        gui._refresh_chart = _orig_refresh_chart
+    # reaching here at all means the exception did not escape the guarded slot
+    print("guard held")
+
     print("SMOKE OK")
     """
 )
