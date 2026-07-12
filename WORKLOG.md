@@ -949,6 +949,21 @@ the darker green. It's now a one-line knob — darker: halve GREEN → `#185727`
 `#2fae4e`. Verified by sampling the rendered board: the selected row now fills `#1c682f` (6,255 px)
 and the bright `#2fae4e` is down to just the panel borders (1,620 px). Full suite: 91 pass.
 
+## 2026-07-12 — GUI bugfix: ticker forced an off-screen minimum window width
+
+Matthew maximized the window and the chart vanished; restoring left the window oversized and it ran
+off the screen. The console gave it away: `minimum size: 3436x670` — wider than his 1920 monitor.
+Cause: the ticker `QLabel` holds the full ~18-symbol marquee string (~420 chars ≈ 6357px) with no
+width constraint, so once `_scroll_ticker` populated it (first timer tick), its `sizeHint` dragged the
+whole window's minimum width past the screen — Windows then clamped the geometry (`Unable to set
+geometry …`) and the layout starved the right column (chart) to zero width. (The `KeyboardInterrupt`
+at `_on_timer` in his paste was just where his Ctrl+C landed — not a bug.)
+
+Fix: `self.ticker.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)` — the marquee already
+fills-and-clips via the manual rotate in `_scroll_ticker`, so ignoring its text width for layout is
+exactly right. Window minimum drops 3436 → 1521; verified the chart keeps a healthy width at 1920×1017
+(719px), 1366×768 and 1000×650, and the window maximizes/restores normally. Full suite: 91 pass.
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live

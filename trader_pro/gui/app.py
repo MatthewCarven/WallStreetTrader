@@ -22,8 +22,8 @@ from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog, QDialogButtonBox,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSplitter, QTableView,
-    QVBoxLayout, QWidget,
+    QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSplitter,
+    QTableView, QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money
@@ -623,6 +623,9 @@ class TraderGUI(QMainWindow):
         self.ticker.setFont(mono)
         self.ticker.setFixedHeight(22)
         self.ticker.setStyleSheet(f"color: {AMBER}; background: #000000; padding: 1px 6px;")
+        # Ignore the (huge, ~3400px) text width for sizing — it's a marquee, it fills the bar and
+        # clips. Without this the populated ticker forces the whole window's minimum width off-screen.
+        self.ticker.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         root.addWidget(self.ticker)
 
         controls = QHBoxLayout()
