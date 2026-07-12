@@ -1037,9 +1037,10 @@ silently and never raise. Scope chosen: **both asks only**. Error handler: **ven
 checkpointed — one commit per step = one rollback point.
 
 ### ⏸ RESUME POINTER  (update after every step)
-- Last completed: **Step 1** — fills now log to `self.news` via `model.fill_entry`; 24 GUI tests pass.
-- Next: **Step 2** — vendor error handler + `trader_pro/errlog.py` shim.
-- HEAD anchor before work: `5514a8e`. Step 0 = `7f64c1d`.
+- Last completed: **Step 2** — vendored `_errhandler.py` + `errlog.py` (`guard`, `setup_logging`,
+  `install_global_hooks`); 7 errlog/fill tests + full suite 99 pass. Nothing wired into the GUI yet.
+- Next: **Step 3** — call `errlog.setup_logging()` in `run_gui()` and decorate the Qt slots with `@guard`.
+- HEAD anchors: base `5514a8e` · Step 0 `7f64c1d` · Step 1 `227c037`.
 - To roll back code: `git reset --hard <step-commit-sha>`. To resume: read the plan below and do "Next".
 
 ### Plan

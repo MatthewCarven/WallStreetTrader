@@ -13,6 +13,9 @@ env/
 saves/
 *.world
 
+# Silent error log written by trader_pro/errlog.py at runtime
+logs/
+
 # OS / editor
 .DS_Store
 Thumbs.db
