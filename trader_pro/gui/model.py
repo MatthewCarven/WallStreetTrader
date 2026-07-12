@@ -11,6 +11,7 @@ from collections import namedtuple
 from ..cli import TraderApp, fmt_clock, money
 from ..core import AssetKind, World, load_seed_universe
 from ..core.engine import DAY, HOUR, WEEK
+from ..core.orders import fee_rate
 from ..core.portfolio import MAINTENANCE_MARGIN_RATIO
 from ..persistence import autosave_path, has_autosave, load_game
 
@@ -301,7 +302,13 @@ def trade_quantity(world, aid: str, verb: str, token: str) -> float:
     pos = pf.positions.get(aid)
     token = token.strip()
     if not token:
-        if verb in ("buy", "short"):
+        if verb == "buy":
+            # blank 'buy' spends cash on hand only — no 2:1 margin. Divide by (price + commission)
+            # so a max buy never tips into margin even with fees on. Explicit qty / $amount can
+            # still use margin (execute_order enforces the initial-margin limit).
+            per_share = price * (1 + fee_rate(getattr(world.config, "fee_level", "off")))
+            return max(0.0, pf.cash) / per_share if per_share > 0 else 0.0
+        if verb == "short":
             return pf.buying_power(world.price_of) / price if price else 0.0
         if verb == "sell":
             return pos.quantity if pos and pos.quantity > 0 else 0.0

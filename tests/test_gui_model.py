@@ -148,11 +148,25 @@ def test_trade_quantity_parsing():
     price = world.price(aid)
     assert trade_quantity(world, aid, "buy", "10") == 10                      # plain number
     assert abs(trade_quantity(world, aid, "buy", "$1000") - 1000 / price) < 1e-9   # dollar amount
+    # empty buy => spend cash on hand only, NOT the 2:1 buying power
+    assert abs(trade_quantity(world, aid, "buy", "") - world.portfolio.cash / price) < 1e-6
+    # empty short still uses full buying power (2:1 margin)
     bp = world.portfolio.buying_power(world.price_of)
-    assert abs(trade_quantity(world, aid, "buy", "") - bp / price) < 1e-6     # empty buy => max
+    assert abs(trade_quantity(world, aid, "short", "") - bp / price) < 1e-6
     assert trade_quantity(world, aid, "sell", "") == 0.0                      # nothing held
     assert trade_quantity(world, aid, "sell", "all") == 0.0
     assert trade_quantity(world, aid, "buy", "abc") == 0.0                    # garbage => 0
+
+
+def test_trade_quantity_buy_reserves_for_fees():
+    from trader_pro.core.orders import fee_rate
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0, fee_level="high")
+    aid = kind_ids(world, AssetKind.CRYPTO)[0]
+    price = world.price(aid)
+    # a max buy leaves room for the commission, so total outlay == cash (no margin)
+    expected = world.portfolio.cash / (price * (1 + fee_rate("high")))
+    assert abs(trade_quantity(world, aid, "buy", "") - expected) < 1e-6
 
 
 def test_margin_fill_and_color():

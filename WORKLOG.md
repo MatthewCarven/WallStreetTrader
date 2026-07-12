@@ -964,6 +964,20 @@ fills-and-clips via the manual rotate in `_scroll_ticker`, so ignoring its text 
 exactly right. Window minimum drops 3436 → 1521; verified the chart keeps a healthy width at 1920×1017
 (719px), 1366×768 and 1000×650, and the window maximizes/restores normally. Full suite: 91 pass.
 
+## 2026-07-12 — GUI: blank 'buy' spends cash on hand, not full 2:1 buying power
+
+Matthew noticed the trade dialog's blank-quantity **buy** (the "max buy" shortcut) used
+`buying_power` (= 2× equity), silently leveraging him to the 2:1 limit. Changed `model.trade_quantity`
+so a blank **buy** spends **cash on hand only** — `max(0, cash) / (price · (1 + fee_rate))`, reserving
+for the commission so it never tips into margin even with fees on. Blank **short** still uses full
+buying power (a short is inherently a margin action), and an explicit qty / `$amount` can still use
+margin (execute_order enforces the initial-margin limit). GUI-only — the Textual TUI's blank-buy is
+unchanged (offered to sync it if he wants).
+
+Verified: $5,000 cash → a blank buy now spends exactly $5,000 (was $10,000 via margin), margin debt
+stays $0, gross = equity, meter 0.25 (was 0.50). Full suite: 92 pass (added a fee-reserve test + a
+blank-short-still-uses-margin assertion).
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
