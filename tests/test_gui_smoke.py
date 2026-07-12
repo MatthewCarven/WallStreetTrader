@@ -125,6 +125,7 @@ _SMOKE = textwrap.dedent(
     gui._refresh_chart()
     xdata, ydata = gui._curve.getData()
     assert xdata is not None and len(xdata) > 1            # a real series for the selected asset
+    assert xdata[-1] == gui.trader.world.market.tick_index  # leading edge pinned to the current minute
     r0 = gui.chart_range
     gui.cycle_chart_range()
     assert gui.chart_range == (r0 + 1) % len(CHART_RANGES)

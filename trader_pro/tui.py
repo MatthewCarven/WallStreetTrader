@@ -26,6 +26,7 @@ from rich.text import Text
 from .cli import TraderApp
 from .core import AssetKind, Order, OrderSide, World, execute_order, load_seed_universe
 from .core.engine import DAY, HOUR, WEEK
+from .core.orders import fee_rate
 from .persistence import (
     SAVES_DIR, save_game, load_game, list_saves, delete_save, slot_path,
     autosave_path, has_autosave, AUTOSAVE_SLOT,
@@ -246,8 +247,12 @@ class TradeDialog(ModalScreen):
         pos = w.portfolio.positions.get(self.aid)
         price = w.price(self.aid)
         token = self.query_one("#qty", Input).value.strip()
-        if not token:  # Empty quantity: default to max buy/sell
-            if verb in ("buy", "short"):
+        if not token:  # Empty quantity: default to max
+            if verb == "buy":
+                # spend cash on hand only — no 2:1 margin (reserve for the commission)
+                per = price * (1 + fee_rate(getattr(w.config, "fee_level", "off")))
+                qty = max(0.0, w.portfolio.cash) / per if per > 0 else 0.0
+            elif verb == "short":
                 qty = w.portfolio.buying_power(w.price_of) / price
             elif verb == "sell":
                 qty = pos.quantity if pos and pos.quantity > 0 else 0.0

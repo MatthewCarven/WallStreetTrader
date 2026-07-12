@@ -795,6 +795,8 @@ class TraderGUI(QMainWindow):
         self.chart.setMenuEnabled(False)
         self.chart.hideButtons()
         self.chart.setMouseEnabled(x=False, y=False)
+        self.chart.setClipToView(True)                  # render only what's in view ...
+        self.chart.getPlotItem().setDownsampling(auto=True, mode="peak")  # ... cheap even at ~1440 pts
         self.chart.getPlotItem().hideAxis("bottom")     # tick-minute x labels aren't meaningful
         self.chart.getAxis("left").setTextPen(DIM)
         self._curve = self.chart.plot([], [])
@@ -1133,14 +1135,17 @@ class TraderGUI(QMainWindow):
         label, span = CHART_RANGES[self.chart_range]
         t = w.market.tick_index
         start = max(0, t - span)
-        step = max(1, span // 240)                  # ~240 points across the panel
-        series = eng.series(aid, start, t + 1, step)
+        step = max(1, span // 1440)                 # ~1440 pts: 1:1 (per-minute) up to the 1D view,
+        series = eng.series(aid, start, t + 1, step)  # lightly downsampled beyond it (3D / 1W)
+        xs = [tk for tk, _ in series]
         ys = [p for _, p in series]
+        cur = w.price(aid)
+        if not xs or xs[-1] != t:                   # pin the current minute as a live leading edge
+            xs.append(t)
+            ys.append(cur)
         if not ys:
             self._curve.setData([], [])
             return
-        xs = [tk for tk, _ in series]
-        cur = w.price(aid)
         chg = (cur / ys[0] - 1) * 100 if ys[0] else 0.0
         color = GREEN if chg >= 0 else RED
         fill = QColor(color)
