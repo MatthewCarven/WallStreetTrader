@@ -978,6 +978,27 @@ Verified: $5,000 cash → a blank buy now spends exactly $5,000 (was $10,000 via
 stays $0, gross = equity, meter 0.25 (was 0.50). Full suite: 92 pass (added a fee-reserve test + a
 blank-short-still-uses-margin assertion).
 
+## 2026-07-12 — TUI: sync blank-buy to cash-on-hand · GUI: 1:1 per-minute chart edge
+
+Two follow-ups from Matthew's playtesting.
+
+**TUI blank-buy synced.** Made the Textual TUI's `TradeDialog` blank-quantity **buy** match the GUI —
+cash on hand only (`max(0, cash) / (price·(1+fee_rate))`), not the 2:1 buying power; blank short still
+uses margin. Both front-ends now behave identically. (The little quantity-resolution logic is now
+duplicated in `tui.py` and `gui/model.trade_quantity` — small enough to leave; a shared helper could
+dedupe it later if it drifts.)
+
+**GUI chart 1:1.** Matthew noticed the price chart's newest point only advanced every ~6 ticks. Cause:
+`_refresh_chart` sampled `span // 240` — for the 1D view (1440 min) that's 6 min/point, and the leading
+point only landed on the 6-min grid. Bumped the budget to ~1440 points (`span // 1440`), so 1H and 1D
+are per-minute 1:1 and 3D/1W are only lightly downsampled; and it now **always pins the current minute
+`(t, price)` as the final point**, so the live edge advances every tick on every range. Enabled
+pyqtgraph `setClipToView(True)` + `setDownsampling(auto, mode="peak")` so the extra points stay cheap.
+Verified: 1D chart = 1441 points and the leading edge tracks the clock 1:1 (tick 2881→2881, 2882→2882,
+…). The equity curve was already per-advance. Full suite: 92 pass.
+
+Committed as `4ea966a`.
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live
