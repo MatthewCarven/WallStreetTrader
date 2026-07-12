@@ -231,6 +231,23 @@ def test_event_and_closure_entry():
     assert "MARGIN CALL" in ctext and "BTR" in ctext and ccolor == RED
 
 
+def test_fill_entry():
+    from trader_pro.core import ExecutionResult, Order, OrderSide
+    from trader_pro.gui.model import GREEN_HI, fill_entry
+    # a buy: green, uppercased verb, symbol & price; fee appended when non-zero
+    res = ExecutionResult(True, Order("STOCK:AAPL", OrderSide.BUY, 10), price=150.0, fee=1.5)
+    text, color = fill_entry("buy", 10, "AAPL", res)
+    assert text.startswith("BUY 10 AAPL @") and "fee" in text and color == GREEN
+    # a sell that realizes P&L: red, "realized" shown
+    res2 = ExecutionResult(True, Order("STOCK:AAPL", OrderSide.SELL, 10), price=160.0,
+                           realized_pnl=95.0)
+    t2, c2 = fill_entry("sell", 10, "AAPL", res2)
+    assert "SELL 10 AAPL @" in t2 and "realized" in t2 and c2 == RED
+    # verb -> colour mapping matches the TradeDialog buttons for short / cover
+    assert fill_entry("short", 1, "AAPL", res2)[1] == AMBER
+    assert fill_entry("cover", 1, "AAPL", res)[1] == GREEN_HI
+
+
 def test_save_info_line(tmp_path):
     from trader_pro.gui.model import save_info_line
     from trader_pro.persistence import list_saves, save_game, slot_path

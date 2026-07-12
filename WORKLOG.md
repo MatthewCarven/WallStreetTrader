@@ -1037,8 +1037,9 @@ silently and never raise. Scope chosen: **both asks only**. Error handler: **ven
 checkpointed — one commit per step = one rollback point.
 
 ### ⏸ RESUME POINTER  (update after every step)
-- Last completed: **Step 0** — plan written.  HEAD anchor before work: `5514a8e`.
-- Next: **Step 1** — trade fills into the activity log.
+- Last completed: **Step 1** — fills now log to `self.news` via `model.fill_entry`; 24 GUI tests pass.
+- Next: **Step 2** — vendor error handler + `trader_pro/errlog.py` shim.
+- HEAD anchor before work: `5514a8e`. Step 0 = `7f64c1d`.
 - To roll back code: `git reset --hard <step-commit-sha>`. To resume: read the plan below and do "Next".
 
 ### Plan

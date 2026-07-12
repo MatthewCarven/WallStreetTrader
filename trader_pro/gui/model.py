@@ -423,6 +423,19 @@ def closure_entry(closure) -> tuple:
             f"@ {money(c.price)} (P&L {c.realized_pnl:+,.2f})", RED)
 
 
+def fill_entry(verb: str, qty: float, sym: str, res) -> tuple:
+    """(text, colour) for one executed trade fill in the activity log — the buy/sell sibling of
+    event_entry / closure_entry. Colour matches the TradeDialog verb buttons (buy/cover green,
+    sell red, short amber). `res` is an order result carrying .price/.fee/.realized_pnl."""
+    extra = ""
+    if res.fee:
+        extra += f"   fee {money(res.fee)}"
+    if res.realized_pnl:
+        extra += f"   realized {money(res.realized_pnl)}"
+    color = {"buy": GREEN, "sell": RED, "short": AMBER, "cover": GREEN_HI}.get(verb, FG)
+    return (f"{verb.upper()} {qty:g} {sym} @ {money(res.price)}{extra}", color)
+
+
 def save_info_line(info) -> str:
     """One-line summary of a save slot (persistence.SaveInfo) for the load browser."""
     tag = "  (autosave)" if info.is_autosave else ""

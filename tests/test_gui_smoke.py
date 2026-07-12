@@ -154,6 +154,8 @@ _SMOKE = textwrap.dedent(
     assert pos is not None and pos.quantity > 0                        # now holding it
     assert gui.trader.world.portfolio.cash < cash0                     # cash spent
     gui._on_filled(*dlg.fill)                                          # refresh path doesn't crash
+    assert gui.news.item(0).text().startswith("BUY")                  # the fill is logged, newest on top
+    assert aid.split(":", 1)[1] in gui.news.item(0).text()            # ...into the same activity list
     gui.view_owned()
     assert gui.board_model.rowCount() >= 1                             # holding shows in Owned
     # rejection: an absurd order shows a message and does not fill

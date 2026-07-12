@@ -40,7 +40,8 @@ from ..persistence import (
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
     PANEL, POSITION_COLUMNS, RED, SELECTION, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
-    closure_entry, default_watchlist, event_entry, header_html, kind_ids, margin_call_message,
+    closure_entry, default_watchlist, event_entry, fill_entry, header_html, kind_ids,
+    margin_call_message,
     margin_color, margin_fill, movers_ids, position_rows, prediction_summary, row_ctx,
     save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
 )
@@ -1217,12 +1218,9 @@ class TraderGUI(QMainWindow):
         self._refresh_equity()
         self._refresh_detail()
         self._refresh_positions()
-        extra = ""
-        if res.fee:
-            extra += f"   fee {money(res.fee)}"
-        if res.realized_pnl:
-            extra += f"   realized {money(res.realized_pnl)}"
-        self.statusBar().showMessage(f"{verb} {qty:g} {sym} @ {money(res.price)}{extra}", 6000)
+        text, color = fill_entry(verb, qty, sym, res)
+        self._log_line(text, color)                 # fills land in the activity log, beside the news
+        self.statusBar().showMessage(text, 6000)
 
     def _notify_margin_call(self, closures) -> None:
         if self.playing:                            # a margin call is a stop-and-look moment
