@@ -1027,3 +1027,35 @@ Verified the coins load and render: 36 across 15 archetypes, new ones show corre
 Committed the crypto seed (`build_seed.py`, `crypto.json`, `test_tui.py`) on top of Matthew's staged
 coin WIP. Left the separate TUI default-max-quantity WIP in `tui.py` untouched (still Matthew's).
 Commit is local — not pushed.
+
+## 2026-07-12 — GUI polish: trade log + silent error-handler integration (PLAN)
+
+Matthew asked to (1) record buy/sell fills in the same activity list the new-world settings log to,
+and (2) integrate his separate `Python ErrorHandler/error_handler.py` so GUI errors are logged
+silently and never raise. Scope chosen: **both asks only**. Error handler: **vendored copy** into
+`trader_pro/` (single stdlib-only file, no new deps). Credit may run out mid-run, so this is
+checkpointed — one commit per step = one rollback point.
+
+### ⏸ RESUME POINTER  (update after every step)
+- Last completed: **Step 0** — plan written.  HEAD anchor before work: `5514a8e`.
+- Next: **Step 1** — trade fills into the activity log.
+- To roll back code: `git reset --hard <step-commit-sha>`. To resume: read the plan below and do "Next".
+
+### Plan
+- **Step 0** — write this plan + resume pointer. *(commit)*
+- **Step 1** — `_on_filled` (gui/app.py ~1213) also calls `_log_line` so fills land in `self.news`,
+  the same list `_after_world_swap` logs "New world · …" to. Verb-colored (buy/cover green,
+  sell/short red/amber, matching the TradeDialog buttons). Message mirrors the status-bar line.
+  Extend `tests/test_gui_smoke.py`. *(commit)*
+- **Step 2** — vendor `error_handler.py` → `trader_pro/_errhandler.py`; add `trader_pro/errlog.py`
+  with `guard` (= `capture(reraise=False, on_report=…)`), `setup_logging()` writing to a log file,
+  and a no-op fallback so the shim is never itself a crash source. Unit test guard swallows + logs. *(commit)*
+- **Step 3** — wire `guard` onto the GUI Qt slots (timer tick first — runs every real second — plus
+  trade / new-world / save / load / command handlers); call setup in `run_gui()`. Verify GUI launches. *(commit)*
+- **Step 4** — docs + final worklog. *(commit)*
+
+### Notes for a cold resume
+- Activity list = `self.news` (QListWidget); write via `_log_line(text, color)` (gui/app.py:1017).
+- Colors available: `GREEN, GREEN_HI, RED, AMBER, DIM`. Fill result `res` has `.price .fee .realized_pnl`.
+- Error-handler public API: `describe_error(e)` (never raises), `capture(reraise=False, on_report=cb)`,
+  `install(hooks=…, style=…, stream=…)`. Source lives in the sibling `Python ErrorHandler` project.
