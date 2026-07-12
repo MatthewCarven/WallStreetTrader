@@ -1036,13 +1036,10 @@ silently and never raise. Scope chosen: **both asks only**. Error handler: **ven
 `trader_pro/` (single stdlib-only file, no new deps). Credit may run out mid-run, so this is
 checkpointed — one commit per step = one rollback point.
 
-### ⏸ RESUME POINTER  (update after every step)
-- Last completed: **Step 3** — `run_gui()` calls `setup_logging()`; 15 GUI slots (timer tick + every
-  user action) wear `@guard`. Smoke test proves a raising slot is swallowed; full suite 99 pass.
-  Verified end-to-end: default `logs/trader_pro.log` created + global excepthook routes into it.
-- Next: **Step 4** — docs (README + design note) + final worklog write-up.
-- HEAD anchors: base `5514a8e` · Step 0 `7f64c1d` · Step 1 `227c037` · Step 2 `a47d7e4`.
-- To roll back code: `git reset --hard <step-commit-sha>`. To resume: read the plan below and do "Next".
+### ✅ COMPLETE  (all steps landed)
+- Both asks shipped; full suite 99 pass throughout.
+- HEAD anchors: base `5514a8e` · Step 0 `7f64c1d` · Step 1 `227c037` · Step 2 `a47d7e4` · Step 3 `d27fae2`.
+- To roll back code: `git reset --hard <step-commit-sha>`. Results write-up below.
 
 ### Plan
 - **Step 0** — write this plan + resume pointer. *(commit)*
@@ -1062,3 +1059,40 @@ checkpointed — one commit per step = one rollback point.
 - Colors available: `GREEN, GREEN_HI, RED, AMBER, DIM`. Fill result `res` has `.price .fee .realized_pnl`.
 - Error-handler public API: `describe_error(e)` (never raises), `capture(reraise=False, on_report=cb)`,
   `install(hooks=…, style=…, stream=…)`. Source lives in the sibling `Python ErrorHandler` project.
+
+### Results
+
+**1 · Fills in the activity log.** Buy/sell fills used to only flash the status bar; now they also
+land in `self.news` — the same list the "New world · …" line logs to. Added `model.fill_entry(verb,
+qty, sym, res)`, the buy/sell sibling of `event_entry`/`closure_entry`, returning a `(text, colour)`
+tuple (verb uppercased, price + fee/realized appended). Colours match the TradeDialog buttons:
+buy green, sell red, short amber, cover bright-green. `_on_filled` now routes through it (and the
+status bar reuses the same string), so the fee/realized formatting lives in one place instead of two.
+
+**2 · Silent error handler.** Vendored Matthew's sibling *Python ErrorHandler* project verbatim as
+`trader_pro/_errhandler.py` (stdlib-only, no new deps; banner says re-copy to update) and wrapped it
+in `trader_pro/errlog.py`:
+- `guard` — a decorator for Qt slots. Prefers the vendored `capture(reraise=False, on_report=…)`; if
+  the handler is ever missing it falls back to a hand-rolled swallow. Either way an exception is
+  described and logged, then the slot returns its default — it never re-raises. KeyboardInterrupt /
+  SystemExit still propagate.
+- `setup_logging()` — a rotating `logs/trader_pro.log` sink (1 MB × 3), idempotent, and it wires the
+  vendored `install()` global hooks (excepthook / threading / unraisable) through a `_LogStream` so
+  uncaught errors share the same file.
+- `run_gui()` calls `setup_logging()`; the timer tick and all 15 user-facing slots wear `@guard`.
+
+Design choice worth noting: everything funnels through the stdlib `logging` module (logger
+`trader_pro`) rather than error_handler's own stream, so the file sink, the global hooks, and the
+per-slot guard all land in one place. The vendored copy can drift from the ErrorHandler project — the
+banner comment says to re-copy `error_handler.py` to refresh it.
+
+**Scope deliberately left out** (Matthew chose "both asks only"): the pure view/sort/paging slots are
+*not* guarded — they toggle in-memory view state over already-validated data and are the low-risk
+surface; the crash-prone slots (engine, IO, parsing, the tick) all are. Timestamping fills with the
+sim-clock and persisting the activity log across save/load were offered and declined.
+
+**Tests.** `fill_entry` unit test + a smoke assertion that a buy reaches `news[0]`; 6 errlog tests
+(swallow+default, KeyboardInterrupt passthrough, handler-missing fallback, idempotent setup, hostile
+`__str__`) + a smoke assertion that a slot whose body raises does not propagate. Verified end-to-end
+outside the suite that `logs/trader_pro.log` is created and the installed excepthook routes into it.
+Full suite **99 pass** (was 92). Commits `7f64c1d → d27fae2`, local — not pushed.

@@ -82,11 +82,16 @@ python play_gui.py              # or:  python -m trader_pro.gui
 A native desktop client over the same engine, at feature parity with the TUI. A live market board
 (views · sort · paging · click-to-select), a real-time price chart (1H/1D/3D/1W) beside a net-worth
 equity curve and asset fundamentals, a positions table, a **blue→amber→red margin-risk meter** plus a
-margin-call popup, a news feed + scrolling ticker + top-movers, a save/load browser and a new-world
-dialog (**Game** menu · `Ctrl+N` / `Ctrl+S` / `Ctrl+L`), a predictions dialog, a fees menu, and a `:`
-command line that runs every CLI command. The keys match the TUI table above; **`Enter` or
-double-click** a row to trade, `?` for help. It resumes your last game and autosaves exactly like the
-TUI (they share the `saves/` slots).
+margin-call popup, an activity feed **that logs market news and your own buy/sell fills** + scrolling
+ticker + top-movers, a save/load browser and a new-world dialog (**Game** menu · `Ctrl+N` / `Ctrl+S` /
+`Ctrl+L`), a predictions dialog, a fees menu, and a `:` command line that runs every CLI command. The
+keys match the TUI table above; **`Enter` or double-click** a row to trade, `?` for help. It resumes
+your last game and autosaves exactly like the TUI (they share the `saves/` slots).
+
+> **Never-crash policy.** Every GUI action (and the live market tick) is wrapped so an unexpected
+> error is written to a rotating `logs/trader_pro.log` and quietly swallowed rather than taking down
+> the window. The full-detail reports come from the vendored `error_handler` (a frozen copy of the
+> sibling *Python ErrorHandler* project, wrapped in `trader_pro/errlog.py`).
 
 > PySide6 ships stable-ABI wheels, so it installs on current Pythons (including 3.14). It's an
 > optional extra — the core game, CLI and TUI don't need it.
