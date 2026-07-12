@@ -939,6 +939,16 @@ echoed to the feed. Full suite: 91 pass.
 Committed as `bd214d0`. **The PySide6 desktop GUI is complete — all 11 slices (0–10) done, at TUI
 parity.** `python play_gui.py`. Front-end count is now three (CLI · Textual TUI · PySide6 GUI).
 
+## 2026-07-12 — GUI polish: dim the board row-highlight (SELECTION knob)
+
+Matthew found the selected-row green too bright — it was `GREEN` (#2fae4e), the same green as the
+panel borders, so a whole highlighted row glared. Pulled the highlight into a dedicated
+`model.SELECTION` constant (previously the QSS used `GREEN` inline) and set it to **#1c682f ≈ 0.60×
+GREEN**; also switched the selected-row text from `BG` (dark) to `FG` (light) so it stays readable on
+the darker green. It's now a one-line knob — darker: halve GREEN → `#185727`; brighter: back toward
+`#2fae4e`. Verified by sampling the rendered board: the selected row now fills `#1c682f` (6,255 px)
+and the bright `#2fae4e` is down to just the panel borders (1,620 px). Full suite: 91 pass.
+
 ## 2026-07-11 — Crypto: broaden the coin universe (12 → 36)
 
 Matthew asked to add more crypto "companies," floating a web search. Did a quick survey of the live

@@ -33,6 +33,10 @@ GREEN_HI = "#38c172"
 RED = "#e5484d"
 AMBER = "#ffb000"
 DIM = "#7c8a80"
+# Board row-highlight. A dimmed GREEN so a whole selected row isn't glary — this is the knob to
+# tweak. #1c682f ≈ 0.60x GREEN (47,174,78 -> 28,104,47). Darker: halve GREEN -> #185727. Brighter:
+# back toward GREEN #2fae4e.
+SELECTION = "#1c682f"
 
 
 def steps_for(elapsed: float, ticks_per_sec: float, accum: float) -> tuple[int, float]:

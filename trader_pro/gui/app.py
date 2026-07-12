@@ -39,7 +39,7 @@ from ..persistence import (
 )
 from .model import (
     AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
-    PANEL, POSITION_COLUMNS, RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
+    PANEL, POSITION_COLUMNS, RED, SELECTION, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
     closure_entry, default_watchlist, event_entry, header_html, kind_ids, margin_call_message,
     margin_color, margin_fill, movers_ids, position_rows, prediction_summary, row_ctx,
     save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
@@ -892,8 +892,8 @@ class TraderGUI(QMainWindow):
             f"QMenu {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN}; }}"
             f"QMenu::item:selected {{ background: {GREEN}; color: {BG}; }}"
             f"QTableView {{ background: {BG}; alternate-background-color: {PANEL}; color: {FG};"
-            f" gridline-color: {PANEL}; selection-background-color: {GREEN};"
-            f" selection-color: {BG}; border: 1px solid {PANEL}; outline: none; }}"
+            f" gridline-color: {PANEL}; selection-background-color: {SELECTION};"
+            f" selection-color: {FG}; border: 1px solid {PANEL}; outline: none; }}"
             f"QHeaderView::section {{ background: {PANEL}; color: {DIM}; padding: 4px 10px;"
             f" border: none; border-bottom: 1px solid {GREEN}; }}"
         )
