@@ -24,6 +24,7 @@ MAINTENANCE_MARGIN_RATIO = 0.25
 
 YEAR_TICKS = 365 * 1440          # ticks (minutes) in a simulated year
 HARDSHIP_FLOOR = 1000.0          # you can always borrow at least this to get back in
+MARGIN_APR = 0.08                # annual carry charged on margin debt (negative cash)
 
 PriceFn = Callable[[str], float]
 
@@ -123,14 +124,19 @@ class Portfolio:
         return sum(l.balance for l in self.loans)
 
     def borrow_limit(self, net_worth: float) -> float:
-        """Most you can borrow right now: ~2x net worth, but always at least the floor."""
-        return max(HARDSHIP_FLOOR, 2.0 * max(0.0, net_worth))
+        """Most you can borrow *right now*. Total outstanding loans are capped at ~2x net worth
+        (or the hardship floor), so this nets out what you already owe — you can't dodge the cap
+        by taking many small loans."""
+        ceiling = max(HARDSHIP_FLOOR, 2.0 * max(0.0, net_worth))
+        return max(0.0, ceiling - self.loan_balance())
 
     def take_loan(self, amount: float, net_worth: float, tick: int) -> Loan | None:
-        """Borrow `amount` if within the limit. APR is set by the resulting leverage."""
+        """Borrow `amount` if within the limit. APR is set by *total* leverage after the loan, so
+        splitting a big borrow into small chunks no longer dodges the punitive tiers."""
         if amount <= 0 or amount > self.borrow_limit(net_worth) + 1e-6:
             return None
-        ratio = amount / net_worth if net_worth > 1e-6 else 99.0
+        total = self.loan_balance() + amount
+        ratio = total / net_worth if net_worth > 1e-6 else 99.0
         loan = Loan(principal=amount, balance=amount, apr=loan_apr(ratio), opened_tick=tick)
         self.loans.append(loan)
         self.cash += amount
@@ -151,11 +157,17 @@ class Portfolio:
         return payable
 
     def accrue_interest(self, ticks: int) -> None:
-        """Compound loan interest over `ticks` elapsed minutes."""
+        """Compound loan interest and margin carry over `ticks` elapsed minutes.
+
+        Margin debt (a negative cash balance from leveraged buying) now carries interest too, so
+        leverage held across long idle stretches has a real cost — it isn't free 2:1 buying power."""
         if ticks <= 0:
             return
         for l in self.loans:
             l.balance *= (1.0 + l.apr) ** (ticks / YEAR_TICKS)
+        debt = self.margin_debt()
+        if debt > 0:
+            self.cash -= debt * ((1.0 + MARGIN_APR) ** (ticks / YEAR_TICKS) - 1.0)
 
     def net_worth(self, price_of: PriceFn) -> float:
         """Equity minus outstanding loan debt — the real bottom line."""

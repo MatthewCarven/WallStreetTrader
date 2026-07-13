@@ -1248,3 +1248,31 @@ browser mismatch). Also left for later: disabling Trade/Predict while nothing is
 now the empty-states explain the blank board) and a TUI footer `Enter → Trade` hint.
 
 Commit is local — not pushed.
+
+## 2026-07-14 — Polish pass Tier 4 (gameplay balance) — plan + checkpoints
+
+The design-decision tier. Matthew chose (via a walk-through of the calls): **fix both** debt holes,
+**pay bond coupons**, **fix prediction confidence + price**, and include **both** gentler margin calls
+and milestones/run-stats. So all of Tier 4 is in scope. Money math → one commit per step = one
+rollback point. Verified the two headline claims in code before starting (margin debt uncharged;
+coupons never credited).
+
+Steps (each: engine change + tests + verify):
+- **1 · Debt economics** ✅ — margin carry + aggregate loans.
+- **2 · Bond coupons** — pay coupon income as cash + smooth the yearly-boundary price step.
+- **3 · Predictions** — confidence falls with horizon; cost scales with volatility/edge.
+- **4 · Gentler margin calls** — trim only enough to cure the breach, not the whole largest position.
+- **5 · Milestones / run-stats** — peak net worth, max drawdown, best/worst day, swans survived.
+
+### Step 1 — debt economics ✅
+`portfolio.py`: (a) `accrue_interest` now also compounds **margin debt** (negative cash) at a new
+`MARGIN_APR = 0.08`, so 2:1 leverage held across idle stretches has a real carry cost instead of being
+free — the loan system is no longer strictly dominated. Applies everywhere via the shared
+`TraderApp._advance` (cli.py:369). (b) `borrow_limit` now nets out existing `loan_balance` (total
+loans capped at ~2× net worth), and `take_loan` prices APR on **total** post-loan leverage — so
+splitting a big borrow into small chunks no longer dodges the 6→35% tiers. `test_loans.py` +4
+(margin interest accrues; positive cash doesn't; aggregate cap; stacked loans tier by total). 10
+loan tests pass. Existing tests unaffected (they carry no pre-existing loans, and `(0+amt)/nw` keeps
+the old APR assertion true).
+
+Commit is local — not pushed.

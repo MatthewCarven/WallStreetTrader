@@ -49,6 +49,40 @@ def test_net_worth_nets_out_debt() -> None:
     assert abs(p.net_worth(price_of) - 1000.0) < 1e-9  # 2000 cash - 1000 debt
 
 
+# --- Tier 4: margin carry + aggregate loan limits --- #
+
+def test_margin_debt_accrues_interest() -> None:
+    from trader_pro.core.portfolio import MARGIN_APR
+    p = Portfolio(cash=-1000.0)                       # $1000 of margin debt
+    p.accrue_interest(365 * 1440)                     # one year
+    assert abs(p.cash - (-1000.0 * (1.0 + MARGIN_APR))) < 1.0
+    assert p.cash < -1000.0                           # leverage now carries a cost
+
+
+def test_positive_cash_accrues_no_margin_interest() -> None:
+    p = Portfolio(cash=5000.0)
+    p.accrue_interest(365 * 1440)
+    assert p.cash == 5000.0                            # no debt -> nothing charged
+
+
+def test_loan_limit_is_aggregate_not_per_loan() -> None:
+    p = Portfolio(cash=0.0)
+    nw = 1000.0                                        # ceiling = max(floor, 2*nw) = 2000
+    assert p.take_loan(1500.0, net_worth=nw, tick=0) is not None
+    assert p.take_loan(1000.0, net_worth=nw, tick=0) is None    # 1500+1000 > 2000 cap
+    assert p.take_loan(500.0, net_worth=nw, tick=0) is not None  # exactly to the cap
+    assert p.take_loan(1.0, net_worth=nw, tick=0) is None        # nothing left
+
+
+def test_stacked_loans_priced_on_total_leverage() -> None:
+    p = Portfolio(cash=0.0)
+    nw = 1000.0
+    l1 = p.take_loan(200.0, net_worth=nw, tick=0)     # total 200 -> ratio 0.2
+    l2 = p.take_loan(600.0, net_worth=nw, tick=0)     # total 800 -> ratio 0.8, not its own 0.6
+    assert l1.apr == loan_apr(0.2)
+    assert l2.apr == loan_apr(0.8) and l2.apr > l1.apr  # tier-dodging by chunks is closed
+
+
 if __name__ == "__main__":
     for n, f in sorted(globals().items()):
         if n.startswith("test_") and callable(f):
