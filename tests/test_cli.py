@@ -81,6 +81,40 @@ def test_unknown_command_is_friendly() -> None:
     assert "unknown command" in app.execute("frobnicate")
 
 
+# --- load-flow: saves browser, bare-load, pre-load snapshot --- #
+
+def test_saves_command_lists_slots() -> None:
+    import trader_pro.cli as climod
+    app = _app()
+    with tempfile.TemporaryDirectory() as d:
+        climod.SAVES_DIR = Path(d)
+        app.execute("save alpha"); app.execute("save beta")
+        out = app.execute("saves")
+        assert "alpha" in out and "beta" in out
+
+
+def test_bare_load_browses_not_silently_loads() -> None:
+    import trader_pro.cli as climod
+    app = _app()
+    with tempfile.TemporaryDirectory() as d:
+        climod.SAVES_DIR = Path(d)
+        app.execute("save alpha")
+        out = app.execute("load")                 # no name -> show the browser
+        assert "alpha" in out and "loaded" not in out
+
+
+def test_load_snapshots_current_game_before_replacing() -> None:
+    import trader_pro.cli as climod
+    from trader_pro.persistence import autosave_path
+    app = _app()
+    with tempfile.TemporaryDirectory() as d:
+        climod.SAVES_DIR = Path(d)
+        app.execute("save alpha")
+        assert not autosave_path(Path(d)).exists()
+        app.execute("load alpha")                 # snapshots current -> autosave, then loads
+        assert autosave_path(Path(d)).exists()
+
+
 # --- Tier 2 safety: never-crash, onboarding, autosave gate --- #
 
 def test_run_rejects_non_numeric_delay() -> None:

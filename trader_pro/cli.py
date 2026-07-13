@@ -25,7 +25,9 @@ from .core import (
 from .core.engine import DAY, HOUR
 from .errlog import log_error, setup_logging
 from .fmt import money, fmt_qty
-from .persistence import SAVES_DIR, save_game, load_game, slot_path, autosave_path
+from .persistence import (
+    SAVES_DIR, AUTOSAVE_SLOT, save_game, load_game, slot_path, autosave_path, list_saves,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SPARK = "▁▂▃▄▅▆▇█"
@@ -179,7 +181,7 @@ class TraderApp:
             "hour": lambda a: self._next([str(HOUR)]),
             "day": lambda a: self._next([str(DAY)]),
             "run": self._run,
-            "save": self._save, "load": self._load,
+            "save": self._save, "load": self._load, "saves": self._saves,
             "quit": self._quit, "exit": self._quit, "q": self._quit,
         }.get(cmd)
 
@@ -217,7 +219,8 @@ class TraderApp:
             "  step | hour | day         advance 1 min / 1 hour / 1 day\n"
             "  next <ticks>              advance N minutes\n"
             "  run <ticks> [delay]       live auto-advance (delay sec/tick, default 0.05)\n"
-            "  save [name] | load [name] persist the world\n"
+            "  save [name] | load <name> persist / restore a slot\n"
+            "  saves                     list save slots (bare 'load' lists them too)\n"
             "  quit\n"
             "  (1 tick = 1 simulated minute)"
         )
@@ -585,11 +588,47 @@ class TraderApp:
         return col(f"saved → {name}.world   net worth {money(meta['net_worth'])} "
                    f"({meta['return_pct']:+.1f}%)", C.CYAN)
 
+    def _saves(self, args) -> str:
+        infos = list_saves(SAVES_DIR)
+        if not infos:
+            return "no saves yet — 'save <name>' to store one"
+        now = time.time()
+
+        def age(ep: float) -> str:
+            dt = max(0.0, now - ep) if ep else 0.0
+            if dt < 3600:
+                return f"{int(dt // 60)}m ago"
+            if dt < 86400:
+                return f"{int(dt // 3600)}h ago"
+            return f"{int(dt // 86400)}d ago"
+
+        lines = [col("  saves:", C.DIM)]
+        for i in infos:
+            if i.corrupt:
+                lines.append(col(f"  {i.name:<14} (corrupt)", C.RED))
+                continue
+            nw = money(i.net_worth) if i.net_worth is not None else "?"
+            ret = f"{i.return_pct:+.1f}%" if i.return_pct is not None else ""
+            tag = col("  ·autosave", C.DIM) if i.is_autosave else ""
+            lines.append(f"  {i.name:<14}{i.profile:<9}{nw:>14} ({ret:>6})  "
+                         f"{i.n_positions} pos · {age(i.saved_epoch)}{tag}")
+        lines.append(col("  load <name> to restore · save <name> to store", C.DIM))
+        return "\n".join(lines)
+
     def _load(self, args) -> str:
-        name = args[0] if args else "save"
+        if not args:
+            # bare `load` browses the slots instead of silently loading a stale 'save' slot
+            return self._saves([])
+        name = args[0]
         path = slot_path(name, SAVES_DIR)
         if not path.exists():
-            return col(f"no save named {name}.world", C.YELLOW)
+            return col(f"no save named {name}.world — type 'saves' to list them", C.YELLOW)
+        # snapshot the current game before we replace it, so a mistyped load is recoverable
+        if name != AUTOSAVE_SLOT:
+            try:
+                save_game(self.world, autosave_path(SAVES_DIR), label="autosave")
+            except Exception as exc:
+                log_error(exc, "autosave before load")
         try:
             self.world = load_game(path, self.universe)
         except Exception as exc:
@@ -658,7 +697,10 @@ def repl() -> None:
     choice = input("  [n]ew world or [l]oad a save? [n]: ").strip().lower()
     if choice.startswith("l"):
         app = TraderApp(universe=universe)
-        name = input("  save name [save]: ").strip() or "save"
+        print(app.execute("saves"))
+        infos = list_saves(SAVES_DIR)
+        default = infos[0].name if infos else AUTOSAVE_SLOT      # newest slot, or the autosave
+        name = input(f"  load which slot? [{default}]: ").strip() or default
         print(app.execute(f"load {name}"))
     else:
         app = TraderApp(_prompt_new_world(universe), universe=universe)

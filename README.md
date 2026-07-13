@@ -105,8 +105,8 @@ market | m                overview: your holdings + the crypto board
 stocks [n] | bonds | crypto [n]   list a kind
 find <text>               search by name or symbol
 look <SYM> | l            asset detail + a recent price sparkline
-save [name] | load [name] persist / restore a slot   (load with no name opens the browser)
-saves                     browse, load, or delete save slots
+save [name] | load <name> persist / restore a slot   (bare 'load' lists the slots)
+saves                     list save slots (net worth · return · age); loading snapshots first
 buy  <SYM> <qty|$amount>   e.g. 'buy AAPL 10'  or  'buy BTR $500'
 sell <SYM> <qty|all>       e.g. 'sell AAPL 5'  or  'sell BTR all'
 short <SYM> <qty|$amt>     open/extend a short (profit if it falls)
@@ -121,7 +121,7 @@ fees [off…diabolic]        brokerage difficulty — commission on every trade
 step | hour | day          advance 1 min / 1 hour / 1 day
 next <ticks>               advance N minutes
 run <ticks> [delay]        live auto-advance
-save [name] | load [name]  persist the world
+save [name] | load <name>  persist / restore the world  (bare 'load' or 'saves' to browse)
 quit
                            (1 tick = 1 simulated minute)
 ```
@@ -152,7 +152,8 @@ Calm to ~6%+ on Apocalyptic before events, with fat tails from black swans on to
 pumps), macro events (sector rotations, rate moves), and rare **black swans** — market-wide
 plunges that spawn a burst of correlated aftershocks over the following days. A large enough
 drop can force margin-call liquidations, which push prices down further: that feedback loop
-is what turns a dip into a crash. Bonds catch a flight-to-safety bid when equities tank.
+is what turns a dip into a crash. Bonds catch a flight-to-safety bid when equities tank, and pay
+their coupon as steady cash income while you hold them.
 
 ## Project layout
 

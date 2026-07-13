@@ -1338,3 +1338,29 @@ tunable by design: `MARGIN_APR` (0.08) and prediction `BASE_COST` (50) / `edge`.
 tier: bond price-smoothing (#8) and prediction best/worst-day — both for the reasons above.
 
 Commit is local — not pushed.
+
+## 2026-07-14 — CLI load-flow cleanup (deferred item, "full fix")
+
+The last outstanding item from the polish pass. The CLI's save/load lagged the TUI/GUI and the README
+over-promised a `saves` browser it never had. Matthew picked the full fix:
+
+- **`saves` command** — lists slots newest-first with profile, net worth, return, position count and
+  age (built from the existing `persistence.list_saves`/`SaveInfo`; corrupt slots flagged red).
+- **Bare `load` browses** — instead of silently loading a stale slot literally named `save`, bare
+  `load` now shows the `saves` list; `load <name>` loads a specific slot. Unknown slot → friendly
+  "type 'saves'". The startup "[l]oad" flow prints the list and defaults to the newest slot.
+- **Pre-`load` snapshot** — `load <name>` first snapshots the current game to the `autosave` slot
+  (skipped when loading autosave itself), so a mistyped/regretted load is recoverable.
+- **README reconciled** — the Commands block now matches (bare-load browses; `saves` lists; loading
+  snapshots first), and "How it works" notes bonds pay their coupon as income (Tier 4). CLI `help`
+  gained the `saves` line.
+
+Verified the whole flow against a **temp dir** (per the saves-hygiene memory — never the real
+`saves/`): empty→message, two saves list newest-first, bare `load` browses without loading, `load
+alpha` creates `autosave.world` first, unknown slot friendly. `test_cli.py` +3 (saves lists; bare
+load browses not loads; load snapshots first). Full suite **126 pass** (was 123).
+
+This closes every item from the four-tier polish pass except the two deliberately-deferred Tier-4
+niceties (bond price-smoothing #8, prediction best/worst-day).
+
+Commit is local — not pushed.
