@@ -1248,6 +1248,9 @@ class TraderGUI(QMainWindow):
             f'Positions ({self.positions_model.rowCount()})   '
             f'unrealized <span style="color:{upnl_c}">{signed_money(upnl)}</span>   '
             f'<span style="color:{DIM}">margin headroom {money(pf.maintenance_excess(po))}</span>'
+            f'<br><span style="color:{DIM}">run · peak {money(pf.peak_net_worth)} · '
+            f'max drawdown {pf.max_drawdown * 100:.1f}% · '
+            f'black swans survived {pf.swans_survived}</span>'
         )
 
     # ---- trading ---- #

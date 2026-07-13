@@ -983,6 +983,8 @@ class TraderTUI(App):
                 port.append(f"    @{money(pos.avg_cost)} ", style="dim")
                 port.append(f"{pnl:+,.2f}\n", style="green" if pnl >= 0 else "red")
         port.append(f"\nrealized P&L {money(pf.realized_pnl)}", style="dim")
+        port.append(f"\nrun · peak {money(pf.peak_net_worth)}  dd {pf.max_drawdown * 100:.0f}%  "
+                    f"swans {pf.swans_survived}", style="dim")
         self.query_one("#port", Static).update(port)
 
         hist = pf.nw_history

@@ -83,6 +83,29 @@ def test_save_load_round_trip() -> None:
     assert w2.to_dict() == w.to_dict()  # full state preserved
 
 
+# --- Tier 4: run-stats / milestones --- #
+
+def test_run_stats_track_peak_and_drawdown() -> None:
+    from trader_pro.core.portfolio import Portfolio
+    p = Portfolio(cash=1000.0)
+    price_of = lambda a: 0.0                      # flat: net worth == cash
+    p.record_net_worth(0, price_of)
+    assert p.peak_net_worth == 1000.0 and p.max_drawdown == 0.0
+    p.cash = 1500.0; p.record_net_worth(1, price_of)
+    assert p.peak_net_worth == 1500.0            # new high-water mark
+    p.cash = 900.0; p.record_net_worth(2, price_of)
+    assert abs(p.max_drawdown - (1 - 900 / 1500)) < 1e-9    # 40% peak-to-trough
+    p.cash = 1200.0; p.record_net_worth(3, price_of)
+    assert abs(p.max_drawdown - 0.4) < 1e-9 and p.peak_net_worth == 1500.0   # recovery keeps the worst
+
+
+def test_run_stats_persist_across_save_load() -> None:
+    from trader_pro.core.portfolio import Portfolio
+    p = Portfolio(cash=1000.0, peak_net_worth=5000.0, max_drawdown=0.3, swans_survived=2)
+    p2 = Portfolio.from_dict(p.to_dict())
+    assert (p2.peak_net_worth, p2.max_drawdown, p2.swans_survived) == (5000.0, 0.3, 2)
+
+
 # --- Tier 4: bond coupon income --- #
 
 def test_bond_coupons_pay_income_to_cash() -> None:

@@ -358,6 +358,9 @@ class TraderApp:
                    + (f"   margin debt {money(pf.margin_debt())}" if pf.margin_debt() > 0 else ""))
         out.append(f"  realized P&L {money(pf.realized_pnl)}   "
                    f"unrealized {money(pf.unrealized_pnl(po))}")
+        out.append(col(f"  run · peak {money(pf.peak_net_worth)}   max drawdown "
+                       f"{pf.max_drawdown * 100:.1f}%   black swans survived {pf.swans_survived}",
+                       C.DIM))
         if pf.is_margin_call(po):
             out.append(col("  ⚠ MARGIN CALL — advance time and positions will be liquidated", C.RED))
         return "\n".join(out)
@@ -370,6 +373,7 @@ class TraderApp:
         self.world.accrue_coupons(t1 - t0)
         self.world.portfolio.record_net_worth(t1, self.world.price_of)
         events = self.engine.events.fired_between(t0, t1)
+        self.world.portfolio.swans_survived += sum(1 for e in events if e.kind == "flash_crash")
         closures = liquidate_for_margin(self.world)
         return events, closures
 

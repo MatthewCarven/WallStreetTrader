@@ -1262,7 +1262,7 @@ Steps (each: engine change + tests + verify):
 - **2 · Bond coupons** ✅ — pay coupon income as cash (price-smoothing #8 deliberately deferred).
 - **3 · Predictions** ✅ — confidence falls with horizon; cost scales with the world's edge.
 - **4 · Gentler margin calls** ✅ — trim only enough to cure the breach, not the whole largest position.
-- **5 · Milestones / run-stats** — peak net worth, max drawdown, best/worst day, swans survived.
+- **5 · Milestones / run-stats** ✅ — peak net worth, max drawdown, swans survived (best/worst-day dropped).
 
 ### Step 1 — debt economics ✅
 `portfolio.py`: (a) `accrue_interest` now also compounds **margin debt** (negative cash) at a new
@@ -1314,5 +1314,27 @@ for fees), capped at the position size. Small breaches trim; catastrophic ones s
 trims ~16% and the holding survives; −55%/−70% still close it out. `test_margin.py` +1 (trims not
 nukes on a small breach); the existing blown-up-short liquidation test still passes (deep breach →
 full close). 6 margin tests pass.
+
+### Step 5 — milestones / run-stats ✅
+`Portfolio` gains three serialized fields — `peak_net_worth`, `max_drawdown` (worst peak-to-trough
+fraction), `swans_survived` — updated as time advances: peak/drawdown in `record_net_worth` (called
+every `_advance`), and the swan counter in `_advance` (`sum(1 for e in events if e.kind ==
+"flash_crash")`; aftershocks are `kind="aftershock"`, so no overcount). `from_dict` reads them with
+defaults so old saves still load. Surfaced in all three front-ends: CLI `port` gets a `run · peak …
+max drawdown … black swans survived …` line; the GUI positions summary a second dim line; the TUI
+port panel a compact `run · peak … dd …% swans …`. Verified: an Apocalyptic fast-forward recorded a
+75.6% max drawdown and 2 swans survived. `test_world.py` +2 (peak/drawdown tracking incl. recovery
+keeps the worst; stats persist across save/load). Full suite **123 pass** (was 112 at Tier 3 end).
+
+**best/worst-day dropped (deliberately):** the engine fast-forwards by evaluating seeded anchors, so
+there's no per-day net-worth path to sample during a multi-day jump — a "best/worst day" stat would be
+honest only when stepping day-by-day and silently wrong under fast-forward. Left it out rather than
+ship a misleading number; the other stats are robust at any advance size.
+
+### Tier 4 complete
+All five steps landed, one commit each: `d577810` (debt) · `0259ebd` (bond coupons) · `99c9edc`
+(predictions) · `1203f4c` (margin calls) · this (run-stats). All local — not pushed. Two knobs left
+tunable by design: `MARGIN_APR` (0.08) and prediction `BASE_COST` (50) / `edge`. Deferred within the
+tier: bond price-smoothing (#8) and prediction best/worst-day — both for the reasons above.
 
 Commit is local — not pushed.

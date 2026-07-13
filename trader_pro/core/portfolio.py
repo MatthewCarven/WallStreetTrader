@@ -83,6 +83,10 @@ class Portfolio:
     realized_pnl: float = 0.0
     loans: list[Loan] = field(default_factory=list)
     nw_history: list = field(default_factory=list)   # (tick, net_worth) samples for the equity chart
+    # run-stats / milestones (design.md §8.3), updated as time advances
+    peak_net_worth: float = 0.0
+    max_drawdown: float = 0.0        # worst peak-to-trough drop so far, as a fraction (0..1)
+    swans_survived: int = 0          # black swans weathered while holding this account
 
     # ------------------------------------------------------------------ #
     # Fills — the one mutation path (cash is handled by the order executor)
@@ -179,6 +183,10 @@ class Portfolio:
         no matter how long you play. Prices themselves are never stored (they are a pure function
         of the seed); only this small portfolio curve is."""
         nw = self.net_worth(price_of)
+        if nw > self.peak_net_worth:
+            self.peak_net_worth = nw
+        if self.peak_net_worth > 0:
+            self.max_drawdown = max(self.max_drawdown, 1.0 - nw / self.peak_net_worth)
         h = self.nw_history
         if h and h[-1][0] == tick:
             h[-1] = (tick, nw)
@@ -235,6 +243,9 @@ class Portfolio:
             "positions": {aid: p.to_dict() for aid, p in self.positions.items()},
             "loans": [l.to_dict() for l in self.loans],
             "nw_history": [[int(t), float(v)] for t, v in self.nw_history],
+            "peak_net_worth": self.peak_net_worth,
+            "max_drawdown": self.max_drawdown,
+            "swans_survived": self.swans_survived,
         }
 
     @staticmethod
@@ -245,4 +256,7 @@ class Portfolio:
             positions={aid: Position.from_dict(pd) for aid, pd in d.get("positions", {}).items()},
             loans=[Loan.from_dict(ld) for ld in d.get("loans", [])],
             nw_history=[tuple(x) for x in d.get("nw_history", [])],
+            peak_net_worth=d.get("peak_net_worth", 0.0),
+            max_drawdown=d.get("max_drawdown", 0.0),
+            swans_survived=d.get("swans_survived", 0),
         )
