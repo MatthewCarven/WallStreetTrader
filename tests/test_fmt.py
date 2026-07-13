@@ -1,5 +1,5 @@
 """Unit tests for the shared display formatters (trader_pro/fmt.py)."""
-from trader_pro.fmt import money, fmt_qty
+from trader_pro.fmt import money, fmt_qty, abbrev_money, signed_money
 
 
 def test_money_basic_and_grouping():
@@ -38,3 +38,29 @@ def test_fmt_qty_fractions_scale_decimals_by_magnitude():
 def test_fmt_qty_negative_shorts():
     assert fmt_qty(-1_000_000) == "-1,000,000"
     assert fmt_qty(-0.5) == "-0.5"
+
+
+def test_abbrev_money_for_chart_axes_never_scientific():
+    # Chart axis ticks: compact, no 1.2e+06.
+    assert abbrev_money(1_200_000) == "$1.2M"
+    assert abbrev_money(1_000_000) == "$1M"
+    assert abbrev_money(900_000) == "$900k"
+    assert abbrev_money(120_000) == "$120k"
+    assert abbrev_money(52_540) == "$52.5k"
+    assert abbrev_money(152) == "$152"
+    assert abbrev_money(-1_200_000) == "-$1.2M"
+    for v in (900_000, 1_200_000, 52_540):
+        assert "e" not in abbrev_money(v).lower()
+
+
+def test_abbrev_money_subdollar_falls_back_to_money():
+    # Penny-coin price axis stays legible instead of collapsing to $0.
+    assert abbrev_money(0.0000073) == money(0.0000073)
+    assert abbrev_money(0.99) == "$0.99"
+
+
+def test_signed_money_keeps_sign_and_symbol():
+    assert signed_money(50) == "+$50.00"
+    assert signed_money(-50) == "-$50.00"
+    assert signed_money(0) == "$0.00"
+    assert signed_money(1234.5) == "+$1,234.50"

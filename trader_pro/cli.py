@@ -334,7 +334,7 @@ class TraderApp:
         if not pf.positions:
             out.append("  (no holdings — try 'buy BTR $500' or 'short SLR 50')")
         else:
-            out.append(col(f"  {'SYMBOL':<11}{'QTY':>10}{'AVG':>12}{'PRICE':>12}"
+            out.append(col(f"  {'SYMBOL':<11}{'QTY':>13}{'AVG':>12}{'PRICE':>12}"
                            f"{'VALUE':>13}{'P&L':>18}", C.DIM))
             for aid, pos in pf.positions.items():
                 price = w.price(aid)
@@ -344,7 +344,7 @@ class TraderApp:
                 pnlpct = (pnl / basis * 100) if basis else 0
                 pnls = col(f"{pnl:+,.2f} ({pnlpct:+.1f}%)", C.GREEN if pnl >= 0 else C.RED)
                 tag = col(" SHORT", C.YELLOW) if pos.quantity < 0 else ""
-                out.append(f"  {aid.split(':',1)[1]:<11}{fmt_qty(pos.quantity):>10}{money(pos.avg_cost):>12}"
+                out.append(f"  {aid.split(':',1)[1]:<11}{fmt_qty(pos.quantity):>13}{money(pos.avg_cost):>12}"
                            f"{money(price):>12}{money(val):>13}{pnls:>26}{tag}")
         hv = pf.holdings_value(po)
         out.append("")

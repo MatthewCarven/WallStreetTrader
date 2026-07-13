@@ -1200,3 +1200,51 @@ in — it's a genuine improvement, not just test hygiene.
 a mistyped `load` is recoverable, and bare `load` silently loading a stale `save` slot.
 
 Commit is local — not pushed.
+
+## 2026-07-14 — Polish pass Tier 3 (feel & consistency)
+
+Fit-and-finish across all three front-ends. Lead item surfaced from a screenshot Matthew shared of
+a live GUI run (net worth ~$1.2M): the equity chart's Y-axis was still in **scientific notation**
+(`1.2e+06`) — ironic right after Tier 1 scrubbed `1e+06` out of every text surface.
+
+**GUI charts — money-formatted axes.** pyqtgraph's default `AxisItem` renders large ticks in
+sci-notation. New `MoneyAxis(pg.AxisItem)` (in `gui/app.py`) with `enableAutoSIPrefix(False)` +
+`tickStrings` → compact money via a new `fmt.abbrev_money` (`$1.2M`, `$900k`, `$110k`, sub-dollar
+falls through to `money()` so a penny-coin price axis stays legible). Applied to both the net-worth
+equity curve and the price chart (`axisItems={"left": MoneyAxis(...)}`). Verified: net-worth axis
+`$900k→$1.2M`, price axis `$110k→$125k`.
+
+**Formatting consistency.**
+- P&L columns now show the `$`: new `fmt.signed_money` (`+$50.00` / `-$50.00` / `$0.00`) on the
+  positions P&L cell and the summary's unrealized figure (were bare `+50.00` beside `$`-columns).
+- Flat positions render **neutral** (DIM) at break-even instead of glowing green — matches the
+  board's `cell()` convention (value/pnl: green>0, red<0, else dim).
+- TUI chart hi/lo used `${x:,.0f}` → `$0` for cheap assets; now `money()`, so penny coins show a
+  real range.
+- CLI/TUI portfolio **QTY column widened** (`:>10`/`:>9` → `:>13`) so a grouped 7-figure holding
+  (`1,713,205.88`) no longer overflows and nudges the next column (the nit deferred from Tier 1).
+
+**Empty states.** New `PlaceholderTableView(QTableView)` paints centered dim text when the model is
+empty; `BoardView` extends it and the positions table uses it ("No open positions yet — Enter or
+double-click a board row to trade"); the board sets a contextual line in `_rebuild_board` ("You don't
+own anything yet…" for the Owned view). TUI board gets the same via a `_separator_row` `__empty__`
+line ("you don't own anything yet — press 2 for stocks · 1 for crypto" / "no assets to show in …").
+
+**Small feel.** GUI board **sort ▼** marker on the 1D % header when sorting (BoardModel gains a
+`sort_active` flag set in `_rebuild_board`; the TUI already showed `↓%` in its board title). Dropped
+the dev-jargon resume line ("…lands in slice 9" → "Ctrl+N starts a new world"). Ticker background
+`#000000` → the app's `{BG}` (`#07120b`) so it stops being a colder off-theme black. TUI paused
+status now keeps the speed visible: `[PAUSED · 10 hr/s]` instead of `[PAUSED]`.
+
+**Tests.** `test_fmt.py` +3 (abbrev_money ×2, signed_money); `test_gui_smoke.py` +2 assertions (sort
+▼ header, P&L cell has `$`). Full suite **112 pass** (was 109). Also rendered the GUI offscreen to a
+PNG — confirms the layout/charts/colours render without regression; text shows as boxes there only
+because the offscreen platform lacks Consolas (the real Windows app is fine), so text formatting is
+covered by the unit/smoke assertions instead.
+
+**Deferred (a coherent load-flow unit, more UX-safety than feel):** pre-`load` snapshot so a mistyped
+`load` is recoverable, and bare `load` silently loading a stale `save` slot (+ the README `saves`
+browser mismatch). Also left for later: disabling Trade/Predict while nothing is selected (lower value
+now the empty-states explain the blank board) and a TUI footer `Enter → Trade` hint.
+
+Commit is local — not pushed.

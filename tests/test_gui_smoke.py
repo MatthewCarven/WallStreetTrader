@@ -114,9 +114,12 @@ _SMOKE = textwrap.dedent(
     gui.board.selectRow(0)
     assert gui.cursor_aid == gui.board_model.aid_at(0) and ":" in gui.cursor_aid
     assert gui.selected_label.text().startswith("▶")
-    # sort toggles cleanly
+    # sort toggles cleanly, and the sorted (1D %) column header shows the ▼ marker
+    chg_col = [c[0] for c in BOARD_COLUMNS].index("chg")
     gui.toggle_sort(); assert gui.sort_by_change is True
+    assert "▼" in gui.board_model.headerData(chg_col, Qt.Horizontal, Qt.DisplayRole)
     gui.toggle_sort(); assert gui.sort_by_change is False
+    assert "▼" not in gui.board_model.headerData(chg_col, Qt.Horizontal, Qt.DisplayRole)
 
     # --- Slice 4: price chart ---
     from trader_pro.gui.model import CHART_RANGES
@@ -186,6 +189,10 @@ _SMOKE = textwrap.dedent(
     gui._refresh_positions()
     assert gui.positions_model.rowCount() >= 1             # the open position shows
     assert "Positions" in gui.pos_summary.text()
+    from trader_pro.gui.model import POSITION_COLUMNS
+    pnl_col = [c[0] for c in POSITION_COLUMNS].index("pnl")
+    pnl_cell = gui.positions_model.data(gui.positions_model.index(0, pnl_col), Qt.DisplayRole)
+    assert "$" in pnl_cell                                 # P&L renders as signed money (+$/-$)
 
     # --- Slice 8: news feed, ticker, movers ---
     from trader_pro.core import MarketEvent

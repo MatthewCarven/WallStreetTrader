@@ -71,3 +71,48 @@ def fmt_qty(q: float) -> str:
         return f"{int(q):,}"
     decimals = 2 if abs(q) >= 1 else 6
     return f"{q:,.{decimals}f}".rstrip("0").rstrip(".")
+
+
+def signed_money(x: float) -> str:
+    """Signed dollar amount for P&L displays: ``+$50.00`` / ``-$50.00`` / ``$0.00``.
+
+    P&L columns previously showed ``+50.00`` (no ``$``) beside currency columns that had it;
+    this keeps the sign *and* the symbol so a P&L reads as money at a glance.
+
+    >>> signed_money(50)
+    '+$50.00'
+    >>> signed_money(-50)
+    '-$50.00'
+    >>> signed_money(0)
+    '$0.00'
+    """
+    return f"+{money(x)}" if x > 0 else money(x)
+
+
+def abbrev_money(x: float) -> str:
+    """Compact money for chart axes and tight labels — ``$1.2M``, ``$52.5k``, ``$110``.
+
+    Chart axis ticks need to stay short; pyqtgraph's default renders large values in
+    scientific notation (``1.2e+06``), which is exactly what the rest of the UI avoids.
+    Sub-dollar values fall through to :func:`money` so a penny-coin price axis stays legible.
+
+    >>> abbrev_money(1_200_000)
+    '$1.2M'
+    >>> abbrev_money(900_000)
+    '$900k'
+    >>> abbrev_money(52_540)
+    '$52.5k'
+    >>> abbrev_money(152)
+    '$152'
+    >>> abbrev_money(-1_200_000)
+    '-$1.2M'
+    """
+    a = abs(float(x))
+    sign = "-" if x < 0 else ""
+    for div, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
+        if a >= div:
+            body = f"{a / div:.1f}".rstrip("0").rstrip(".")
+            return f"{sign}${body}{suffix}"
+    if a >= 1:
+        return f"{sign}${a:,.0f}"
+    return money(x)

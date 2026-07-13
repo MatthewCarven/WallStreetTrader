@@ -46,6 +46,19 @@ from .model import (
     save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
 )
 from ..errlog import guard, setup_logging
+from ..fmt import abbrev_money, signed_money
+
+
+class MoneyAxis(pg.AxisItem):
+    """Left axis that renders ticks as compact money ($1.2M, $110k) instead of pyqtgraph's
+    default scientific notation (1.2e+06) — matching the no-sci-notation rule everywhere else."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.enableAutoSIPrefix(False)          # suppress the '×1e6' exponent label
+
+    def tickStrings(self, values, scale, spacing):
+        return [abbrev_money(v) for v in values]
 
 
 class MarginMeter(QWidget):
@@ -75,7 +88,24 @@ class MarginMeter(QWidget):
         p.end()
 
 
-class BoardView(QTableView):
+class PlaceholderTableView(QTableView):
+    """A table that paints centered dim text over an empty viewport, so a board view with no
+    matches or a flat positions table reads as intentional rather than broken."""
+
+    def __init__(self, placeholder: str = "", parent=None):
+        super().__init__(parent)
+        self.placeholder_text = placeholder
+
+    def paintEvent(self, event) -> None:   # noqa: N802 — Qt override name
+        super().paintEvent(event)
+        model = self.model()
+        if self.placeholder_text and (model is None or model.rowCount() == 0):
+            painter = QPainter(self.viewport())
+            painter.setPen(QColor(DIM))
+            painter.drawText(self.viewport().rect(), Qt.AlignCenter, self.placeholder_text)
+
+
+class BoardView(PlaceholderTableView):
     """The board table. Type-ahead row search is disabled so single-letter shortcuts (0-4 views,
     `o` sort, `s`/`h`/`d` steps) reach their buttons instead of being swallowed as search keys."""
 
@@ -94,6 +124,7 @@ class BoardModel(QAbstractTableModel):
         self.trader = trader
         self.aids: list[str] = []
         self._rows: list = []
+        self.sort_active = False          # drives the ▼ glyph on the sorted (1D %) column header
 
     def set_aids(self, aids) -> None:
         self.beginResetModel()
@@ -126,7 +157,8 @@ class BoardModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            return BOARD_COLUMNS[section][1]
+            key, label = BOARD_COLUMNS[section]
+            return f"{label} ▼" if self.sort_active and key == "chg" else label
         return None
 
     def data(self, index, role=Qt.DisplayRole):
@@ -189,14 +221,14 @@ class PositionsModel(QAbstractTableModel):
         col = POSITION_COLUMNS[index.column()][0]
         if role == Qt.DisplayRole:
             return {"sym": sym, "qty": fmt_qty(qty), "cost": money(cost), "value": money(value),
-                    "pnl": f"{pnl:+,.2f}", "pnlpct": f"{pnlpct:+.2f}%"}[col]
+                    "pnl": signed_money(pnl), "pnlpct": f"{pnlpct:+.2f}%"}[col]
         if role == Qt.ForegroundRole:
             if col == "qty":
                 return QColor(AMBER if qty < 0 else FG)
             if col == "value":
-                return QColor(GREEN if value >= 0 else RED)
-            if col in ("pnl", "pnlpct"):
-                return QColor(GREEN if pnl >= 0 else RED)
+                return QColor(GREEN if value > 0 else (RED if value < 0 else DIM))
+            if col in ("pnl", "pnlpct"):                 # neutral at break-even, like the board
+                return QColor(GREEN if pnl > 0 else (RED if pnl < 0 else DIM))
             return QColor(FG)
         if role == Qt.TextAlignmentRole:
             return int((Qt.AlignLeft if col == "sym" else Qt.AlignRight) | Qt.AlignVCenter)
@@ -631,7 +663,7 @@ class TraderGUI(QMainWindow):
         self.ticker = QLabel("")                     # amber scrolling marquee (scrolls in _on_timer)
         self.ticker.setFont(mono)
         self.ticker.setFixedHeight(22)
-        self.ticker.setStyleSheet(f"color: {AMBER}; background: #000000; padding: 1px 6px;")
+        self.ticker.setStyleSheet(f"color: {AMBER}; background: {BG}; padding: 1px 6px;")
         # Ignore the (huge, ~3400px) text width for sizing — it's a marquee, it fills the bar and
         # clips. Without this the populated ticker forces the whole window's minimum width off-screen.
         self.ticker.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
@@ -777,7 +809,7 @@ class TraderGUI(QMainWindow):
         right_col.setSpacing(6)
 
         # net-worth equity curve (from pf.nw_history) — small, fixed height at the top
-        self.equity_chart = pg.PlotWidget()
+        self.equity_chart = pg.PlotWidget(axisItems={"left": MoneyAxis(orientation="left")})
         self.equity_chart.setBackground(PANEL)
         self.equity_chart.showGrid(x=False, y=True, alpha=0.12)
         self.equity_chart.setMenuEnabled(False)
@@ -798,7 +830,7 @@ class TraderGUI(QMainWindow):
         chart_bar.addStretch(1)
         right_col.addLayout(chart_bar)
 
-        self.chart = pg.PlotWidget()
+        self.chart = pg.PlotWidget(axisItems={"left": MoneyAxis(orientation="left")})
         self.chart.setBackground(PANEL)
         self.chart.showGrid(x=False, y=True, alpha=0.15)
         self.chart.setMenuEnabled(False)
@@ -831,7 +863,8 @@ class TraderGUI(QMainWindow):
         self.pos_summary.setTextFormat(Qt.RichText)
         pos_layout.addWidget(self.pos_summary)
         self.positions_model = PositionsModel(self.trader)
-        self.positions = QTableView()
+        self.positions = PlaceholderTableView(
+            "No open positions yet — Enter or double-click a board row to trade.")
         self.positions.setModel(self.positions_model)
         self.positions.setFont(mono)
         self.positions.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -886,7 +919,7 @@ class TraderGUI(QMainWindow):
         self._build_ticker()
         self._log_line("Welcome to TRADER PRO — the market ticks live; news lands here.", GREEN_HI)
         if self.resumed:
-            self._log_line("Resumed your last game.  (Ctrl+N for a new world lands in slice 9)", AMBER)
+            self._log_line("Resumed your last game.  (Ctrl+N starts a new world)", AMBER)
 
         self.setCentralWidget(central)
         self._apply_theme()
@@ -1093,6 +1126,7 @@ class TraderGUI(QMainWindow):
         """Recompute which asset ids the board shows (view / sort / page changed) and reset the
         model. Live per-tick updates use _refresh_board() instead, which repaints values in place
         without reordering — so rows stay stable and clickable while playing."""
+        self.board_model.sort_active = self.sort_by_change      # header ▼ on the sorted column
         if self.movers:
             ids, label = movers_ids(self.trader.world, self.trader.engine), None
         else:
@@ -1102,6 +1136,11 @@ class TraderGUI(QMainWindow):
                 watch=self.watch, view_page=self.view_page, page_size=self.page_size,
             )
         self.board_model.set_aids(ids)
+        if not ids:
+            self.board.placeholder_text = (
+                "You don't own anything yet — buy from Stocks, Crypto or Bonds."
+                if self.owned_only else "No assets to show in this view."
+            )
         self._restore_selection(ids)
         self.page_label.setText(label or "")
         self.next_btn.setEnabled(label is not None)
@@ -1204,10 +1243,10 @@ class TraderGUI(QMainWindow):
         pf = self.trader.world.portfolio
         po = self.trader.world.price_of
         upnl = pf.unrealized_pnl(po)
-        upnl_c = GREEN if upnl >= 0 else RED
+        upnl_c = GREEN if upnl > 0 else (RED if upnl < 0 else DIM)
         self.pos_summary.setText(
             f'Positions ({self.positions_model.rowCount()})   '
-            f'unrealized <span style="color:{upnl_c}">{upnl:+,.2f}</span>   '
+            f'unrealized <span style="color:{upnl_c}">{signed_money(upnl)}</span>   '
             f'<span style="color:{DIM}">margin headroom {money(pf.maintenance_excess(po))}</span>'
         )
 

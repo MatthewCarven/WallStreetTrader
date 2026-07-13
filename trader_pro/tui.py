@@ -807,12 +807,13 @@ class TraderTUI(App):
         t = w.market.tick_index
         nw = pf.net_worth(po)
         ret = (nw / w.config.starting_cash - 1) * 100
-        speed = "PAUSED" if not self.playing else SPEEDS[self.speed_idx][0]
+        speed = SPEEDS[self.speed_idx][0]
+        speed_label = speed if self.playing else f"PAUSED · {speed}"    # keep speed visible while paused
         status = Text()
         status.append("TRADER PRO ", style="bold cyan")
         status.append(f"seed {w.config.world_seed} · {w.config.profile} · "
                       f"fees {getattr(w.config, 'fee_level', 'off')} · {fmt_clock(t)}   ")
-        status.append(f"[{speed}]\n", style="bold yellow" if self.playing else "dim")
+        status.append(f"[{speed_label}]\n", style="bold yellow" if self.playing else "dim")
         status.append(f"cash {money(pf.cash)}   equity {money(pf.equity(po))}   net worth {money(nw)} ")
         status.append(f"({ret:+.1f}%)\n", style="green" if ret >= 0 else "red")
         status.append(f"sentiment {w.market.sentiment:+.2f}   rate {w.market.interest_rate*100:.2f}%   "
@@ -859,7 +860,7 @@ class TraderTUI(App):
         out.append("\n")
         out.append(f"{money(cur)} ", style=f"bold {tone}")
         out.append(f"{chg:+.2f}%  ", style=tone)
-        out.append(f"hi ${hi:,.0f} lo ${lo:,.0f}", style="dim")
+        out.append(f"hi {money(hi)} lo {money(lo)}", style="dim")
         panel.update(out)
 
     def _visible_columns(self) -> list[tuple]:
@@ -934,6 +935,11 @@ class TraderTUI(App):
             ids, next_label = self._visible()
             for aid in ids:
                 self._add_row(table, aid); row_keys.append(aid)
+            if not ids:                              # empty view: say so instead of a blank board
+                msg = ("you don't own anything yet — press 2 for stocks · 1 for crypto"
+                       if self.owned_only else f"no assets to show in {self.view_label}")
+                self._separator_row(table, Text(msg, style="dim"), "__empty__")
+                row_keys.append("__empty__")
             if next_label:
                 self._separator_row(table, Text("→ " + next_label, style="bold cyan"), "__next__")
                 row_keys.append("__next__")
@@ -972,7 +978,7 @@ class TraderTUI(App):
                 price = w.price(aid)
                 pnl = (price - pos.avg_cost) * pos.quantity
                 tag = " SHORT" if pos.quantity < 0 else ""
-                port.append(f"  {aid.split(':',1)[1]:<10}{fmt_qty(pos.quantity):>9}{tag}\n",
+                port.append(f"  {aid.split(':',1)[1]:<10}{fmt_qty(pos.quantity):>13}{tag}\n",
                             style="yellow" if pos.quantity < 0 else "")
                 port.append(f"    @{money(pos.avg_cost)} ", style="dim")
                 port.append(f"{pnl:+,.2f}\n", style="green" if pnl >= 0 else "red")
@@ -996,7 +1002,7 @@ class TraderTUI(App):
             eq.append(f"{money(cur)}  ", style="bold " + tone)
             eq.append(f"{ret:+.1f}%\n", style=tone)
             eq.append(sparkline(disp) + "\n", style=tone)
-            eq.append(f"hi ${hi:,.0f}  lo ${lo:,.0f}  · {len(hist)}p", style="dim")
+            eq.append(f"hi {money(hi)}  lo {money(lo)}  · {len(hist)}p", style="dim")
         else:
             eq.append("NET WORTH\n", style="bold")
             eq.append("play the clock ▶ to chart it", style="dim")
