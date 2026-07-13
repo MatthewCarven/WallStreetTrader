@@ -1259,7 +1259,7 @@ coupons never credited).
 
 Steps (each: engine change + tests + verify):
 - **1 · Debt economics** ✅ — margin carry + aggregate loans.
-- **2 · Bond coupons** — pay coupon income as cash + smooth the yearly-boundary price step.
+- **2 · Bond coupons** ✅ — pay coupon income as cash (price-smoothing #8 deliberately deferred).
 - **3 · Predictions** — confidence falls with horizon; cost scales with volatility/edge.
 - **4 · Gentler margin calls** — trim only enough to cure the breach, not the whole largest position.
 - **5 · Milestones / run-stats** — peak net worth, max drawdown, best/worst day, swans survived.
@@ -1274,5 +1274,23 @@ splitting a big borrow into small chunks no longer dodges the 6→35% tiers. `te
 (margin interest accrues; positive cash doesn't; aggregate cap; stacked loans tier by total). 10
 loan tests pass. Existing tests unaffected (they carry no pre-existing loans, and `(0+amt)/nw` keeps
 the old APR assertion true).
+
+### Step 2 — bond coupon income ✅
+New `World.accrue_coupons(ticks)`: for each held bond it credits `coupon_rate · face · qty · Δt/yr`
+to cash (a long earns, a short pays); wired into `TraderApp._advance` after `accrue_interest`. Bonds
+go from a dead "safe yield" (they only moved on rate trades) to a real passive drip. **No double
+count:** the price is the PV of *remaining* coupons and a par bond (seed case: `coupon_rate ==
+base_yield`) marks at par regardless of how many coupons remain, so the income is genuinely additive
+— verified: 10× GOVT-30Y (5.44%) earns exactly $544/yr into cash; net worth still reflects rate-driven
+price moves on top. `test_world.py` +2 (income to cash; shorts pay, stocks earn nothing). 12
+world/engine tests pass, incl. the untouched rate↔price invariant.
+
+**#8 price-smoothing deferred (deliberately, per the working agreement — don't brute-force a subtle
+thing).** The yearly-boundary "sawtooth" only shows for *non-par* bonds (par bonds already mark flat
+at par, so the common case is fine). Every consistent fix has a real cost: discrete coupons inherently
+step at anniversaries (that step is the *correct* ex-coupon drop once coupons are paid), and switching
+to continuous-compounding annuity pricing shifts par off-face at seed (~+1.6% on a 30y 4.5% bond),
+which would look wrong. Left the price formula untouched (zero risk to existing bond behavior); the
+income is the valuable part and it's in.
 
 Commit is local — not pushed.

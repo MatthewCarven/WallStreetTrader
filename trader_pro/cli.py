@@ -367,6 +367,7 @@ class TraderApp:
         self.engine.advance(ticks)
         t1 = self.world.market.tick_index
         self.world.portfolio.accrue_interest(t1 - t0)
+        self.world.accrue_coupons(t1 - t0)
         self.world.portfolio.record_net_worth(t1, self.world.price_of)
         events = self.engine.events.fired_between(t0, t1)
         closures = liquidate_for_margin(self.world)

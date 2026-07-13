@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .models import SeedUniverse, load_seed_universe
-from .portfolio import Portfolio
+from .portfolio import Portfolio, YEAR_TICKS
 
 SCHEMA_VERSION = 1
 
@@ -217,6 +217,24 @@ class World:
     def net_worth(self) -> float:
         """Equity minus outstanding loan debt (design.md §8.2)."""
         return self.portfolio.net_worth(self.price_of)
+
+    def accrue_coupons(self, ticks: int) -> float:
+        """Pay bond coupon income into cash, pro-rata over `ticks` elapsed minutes.
+
+        A long bond earns `coupon_rate · face · qty · Δt/yr`; a short pays it. Bond prices are the
+        PV of remaining coupons and par bonds already mark at par, so crediting the coupon as it
+        accrues is the income leg — turning bonds from a dead 'safe yield' into a real passive
+        drip — not a double count. Returns the net cash credited."""
+        if ticks <= 0:
+            return 0.0
+        frac = ticks / YEAR_TICKS
+        credited = 0.0
+        for aid, pos in self.portfolio.positions.items():
+            if pos.quantity and self._kind.get(aid) is AssetKind.BOND:
+                b = self._meta[aid]
+                credited += b.coupon_rate * b.face_value * pos.quantity * frac
+        self.portfolio.cash += credited
+        return credited
 
     def derive_rng(self, salt: str) -> random.Random:
         """A deterministic RNG stream bound to (world_seed, tick, salt). Engine seam."""

@@ -83,6 +83,33 @@ def test_save_load_round_trip() -> None:
     assert w2.to_dict() == w.to_dict()  # full state preserved
 
 
+# --- Tier 4: bond coupon income --- #
+
+def test_bond_coupons_pay_income_to_cash() -> None:
+    from trader_pro.core.portfolio import Position
+    w = World.new(UNIVERSE, world_seed=20260614, starting_cash=100_000.0)
+    aid = make_asset_id(AssetKind.BOND, "GOVT-30Y")
+    b = w.meta_of(aid)
+    w.portfolio.positions[aid] = Position(quantity=10.0, avg_cost=w.price(aid))
+    cash0 = w.portfolio.cash
+    credited = w.accrue_coupons(365 * 1440)                       # one year
+    assert abs(credited - b.coupon_rate * b.face_value * 10) < 1e-6   # long earns the coupon
+    assert abs(w.portfolio.cash - cash0 - credited) < 1e-6           # ...into cash
+
+
+def test_coupons_only_bonds_shorts_pay() -> None:
+    from trader_pro.core.portfolio import Position
+    w = World.new(UNIVERSE, world_seed=20260614, starting_cash=100_000.0)
+    baid = make_asset_id(AssetKind.BOND, "GOVT-30Y")
+    saidd = _a_stock_id()
+    w.portfolio.positions[baid] = Position(quantity=-5.0, avg_cost=w.price(baid))   # short bond
+    w.portfolio.positions[saidd] = Position(quantity=100.0, avg_cost=w.price(saidd))  # long stock
+    credited = w.accrue_coupons(365 * 1440)
+    b = w.meta_of(baid)
+    assert credited < 0                                              # a short bond PAYS the coupon
+    assert abs(credited - (-5.0) * b.coupon_rate * b.face_value) < 1e-6  # stock earns nothing
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
