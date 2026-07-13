@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from .portfolio import INITIAL_MARGIN_RATIO
+from .portfolio import INITIAL_MARGIN_RATIO, MAINTENANCE_MARGIN_RATIO
 
 # Brokerage commission per fill, as a fraction of the traded notional. Charged on BOTH legs of
 # a round-trip, so the round-trip cost is ~2x these. A difficulty dial — friction is the direct
@@ -127,9 +127,17 @@ def liquidate_for_margin(world: "World") -> list[ExecutionResult]:
     while pf.is_margin_call(price_of) and pf.positions and guard < 10_000:
         guard += 1
         aid = max(pf.positions, key=lambda a: abs(pf.positions[a].quantity) * price_of(a))
-        qty = abs(pf.positions[aid].quantity)
+        pos_qty = abs(pf.positions[aid].quantity)
+        price = price_of(aid)
+        # Close only enough notional to restore the maintenance requirement (+ a small buffer for
+        # fees), rather than dumping the entire largest position over a possibly tiny breach.
+        # maintenance_excess = equity − ratio·gross, so the notional to shed is −excess / ratio.
+        need_notional = -pf.maintenance_excess(price_of) / MAINTENANCE_MARGIN_RATIO * 1.02
+        close_qty = pos_qty if price <= 0 else min(pos_qty, need_notional / price)
+        if close_qty <= 0:                       # numerical safety: always make progress
+            close_qty = pos_qty
         side = OrderSide.BUY if pf.positions[aid].quantity < 0 else OrderSide.SELL
-        res = execute_order(world, Order(aid, side, qty))
+        res = execute_order(world, Order(aid, side, close_qty))
         res.message = "margin liquidation"
         closures.append(res)
     return closures

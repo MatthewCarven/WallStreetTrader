@@ -83,6 +83,20 @@ def test_margin_call_liquidates_a_blown_up_short() -> None:
     assert not w.portfolio.is_margin_call(w.price_of)    # cleared after liquidation
 
 
+def test_margin_call_trims_position_not_nukes_it_on_small_breach() -> None:
+    w = _world(cash=10_000.0)
+    aid = _stock(); price = w.price(aid)
+    execute_order(w, Order(aid, OrderSide.BUY, 19_000.0 / price))   # ~1.9x long
+    assert not w.portfolio.is_margin_call(w.price_of)
+    q_before = abs(w.portfolio.positions[aid].quantity)
+    w.market.prices[aid] = price * 0.60                            # a small adverse move -> slight breach
+    assert w.portfolio.is_margin_call(w.price_of)
+    closures = liquidate_for_margin(w)
+    assert closures and not w.portfolio.is_margin_call(w.price_of)  # breach cured
+    assert aid in w.portfolio.positions                            # ...but the holding survives
+    assert abs(w.portfolio.positions[aid].quantity) < q_before      # only trimmed, not force-closed
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

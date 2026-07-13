@@ -1261,7 +1261,7 @@ Steps (each: engine change + tests + verify):
 - **1 · Debt economics** ✅ — margin carry + aggregate loans.
 - **2 · Bond coupons** ✅ — pay coupon income as cash (price-smoothing #8 deliberately deferred).
 - **3 · Predictions** ✅ — confidence falls with horizon; cost scales with the world's edge.
-- **4 · Gentler margin calls** — trim only enough to cure the breach, not the whole largest position.
+- **4 · Gentler margin calls** ✅ — trim only enough to cure the breach, not the whole largest position.
 - **5 · Milestones / run-stats** — peak net worth, max drawdown, best/worst day, swans survived.
 
 ### Step 1 — debt economics ✅
@@ -1304,5 +1304,15 @@ is ~$28, crypto ~$157. Uniform ~2.5× over the old flat cost, × the world facto
 not a near-oracle for free. All relative-cost orderings and determinism preserved (edge is
 world-level). `test_predictions.py` +2 (confidence falls with horizon; cost scales with edge). 6
 prediction tests pass. `BASE_COST`/`edge` are one-liners to retune if it plays too steep.
+
+### Step 4 — gentler margin calls ✅
+`orders.liquidate_for_margin` closed the *entire* largest position each pass — a 1–2% breach could
+nuke your flagship holding and realize the full loss. Now it closes only the notional needed to
+restore the maintenance requirement (`need = −maintenance_excess / MAINTENANCE_MARGIN_RATIO`, ×1.02
+for fees), capped at the position size. Small breaches trim; catastrophic ones still fully liquidate
+(the `min` caps it and the loop moves to the next position). Verified: a slight breach (−40% move)
+trims ~16% and the holding survives; −55%/−70% still close it out. `test_margin.py` +1 (trims not
+nukes on a small breach); the existing blown-up-short liquidation test still passes (deep breach →
+full close). 6 margin tests pass.
 
 Commit is local — not pushed.
