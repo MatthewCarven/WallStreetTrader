@@ -81,6 +81,55 @@ def test_unknown_command_is_friendly() -> None:
     assert "unknown command" in app.execute("frobnicate")
 
 
+# --- Tier 2 safety: never-crash, onboarding, autosave gate --- #
+
+def test_run_rejects_non_numeric_delay() -> None:
+    app = _app()
+    out = app.execute("run 5 abc")                  # used to raise ValueError and kill the REPL
+    assert "usage: run" in out
+    assert app.world.market.tick_index == 0         # rejected before advancing
+
+
+def test_handler_error_is_caught_not_raised() -> None:
+    app = _app()
+
+    def _boom(_args):
+        raise RuntimeError("boom")
+
+    app._news = _boom                               # a command whose body explodes
+    out = app.execute("news")                       # must NOT propagate
+    assert "unexpected error" in out
+
+
+def test_profile_prompt_zero_falls_back_to_normal() -> None:
+    import builtins
+    import trader_pro.cli as climod
+
+    def _run_prompt(profile_token):
+        it = iter([profile_token, "", "", ""])      # profile, seed, cash, fees
+        orig = builtins.input
+        builtins.input = lambda *a, **k: next(it)
+        try:
+            return climod._prompt_new_world(U)
+        finally:
+            builtins.input = orig
+
+    assert _run_prompt("0").config.profile == "Normal"    # the bug: 0 -> PROFILE_NAMES[-1]
+    assert _run_prompt("9").config.profile == "Normal"    # out of range -> Normal
+    assert _run_prompt("8").config.profile == "Apocalyptic"  # valid max still works
+    assert _run_prompt("4").config.profile == "Normal"    # valid default
+
+
+def test_session_fingerprint_tracks_change() -> None:
+    import trader_pro.cli as climod
+    app = _app()
+    fp0 = climod._session_fingerprint(app)
+    app.execute("look BTR")                         # read-only
+    assert climod._session_fingerprint(app) == fp0
+    app.execute("buy BTR $1000")                    # mutates cash + positions
+    assert climod._session_fingerprint(app) != fp0
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

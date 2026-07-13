@@ -352,7 +352,14 @@ class LoadDialog(QDialog):
 
     def _delete(self):
         name = self._name()
-        if name:
+        if not name:
+            return
+        # Confirm before a one-click, irreversible data loss (matches the TUI's delete guard).
+        confirm = QMessageBox.question(
+            self, "Delete save",
+            f"Permanently delete '{name}'?\nThis can't be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)      # default focus: No
+        if confirm == QMessageBox.Yes:
             delete_save(name, self.saves_dir)
             self._fill()
 

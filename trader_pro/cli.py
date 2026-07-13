@@ -23,8 +23,9 @@ from .core import (
     PROFILE_NAMES, get_profile,
 )
 from .core.engine import DAY, HOUR
+from .errlog import log_error, setup_logging
 from .fmt import money, fmt_qty
-from .persistence import SAVES_DIR, save_game, load_game, slot_path
+from .persistence import SAVES_DIR, save_game, load_game, slot_path, autosave_path
 
 ROOT = Path(__file__).resolve().parents[1]
 SPARK = "▁▂▃▄▅▆▇█"
@@ -184,7 +185,14 @@ class TraderApp:
 
         if handler is None:
             return col(f"unknown command {cmd!r} — type 'help'", C.YELLOW)
-        return handler(args)
+        try:
+            return handler(args)
+        except (KeyboardInterrupt, SystemExit):
+            raise                                       # let Ctrl-C / exit through to the REPL
+        except Exception as exc:                        # a bug in one command must not kill the session
+            log_error(exc, f"command {cmd!r}")
+            return col(f"⚠ '{cmd}' hit an unexpected error — logged to logs/trader_pro.log, "
+                       f"your game is unharmed. Type 'help' for commands.", C.RED)
 
     # ---- individual commands ---- #
 
@@ -385,18 +393,30 @@ class TraderApp:
 
     def _run(self, args) -> str:
         ticks = int(args[0]) if args and args[0].isdigit() else HOUR
-        delay = float(args[1]) if len(args) > 1 else 0.05
+        try:
+            delay = float(args[1]) if len(args) > 1 else 0.05
+        except ValueError:
+            return "usage: run <ticks> [delay]  — delay must be a number of seconds"
         live = _color_enabled()
         notices = []
         ev_notices = []
-        for _ in range(ticks):
-            evs, clo = self._advance(1)
-            ev_notices += evs
-            notices += clo
+        ran = 0
+        try:
+            for _ in range(ticks):
+                evs, clo = self._advance(1)
+                ev_notices += evs
+                notices += clo
+                ran += 1
+                if live:
+                    sys.stdout.write("\r" + self.header().splitlines()[1] + "   ")
+                    sys.stdout.flush()
+                    time.sleep(delay)
+        except KeyboardInterrupt:                        # Ctrl-C stops the run, returns to the prompt
             if live:
-                sys.stdout.write("\r" + self.header().splitlines()[1] + "   ")
-                sys.stdout.flush()
-                time.sleep(delay)
+                sys.stdout.write("\n")
+            return col(f"⏹ stopped after {ran}/{ticks} min → "
+                       f"{fmt_clock(self.world.market.tick_index)}", C.YELLOW) \
+                + self._events_notice(ev_notices[:6]) + self._liquidation_notice(notices)
         if live:
             sys.stdout.write("\n")
         return col(f"⏩ ran {ticks} min → {fmt_clock(self.world.market.tick_index)}", C.DIM) \
@@ -590,7 +610,10 @@ def _prompt_new_world(universe) -> World:
         print(f"    {p.level} {p.name:<12} {p.tagline}")
     raw = input("\n  profile [4=Normal]: ").strip() or "4"
     try:
-        profile = PROFILE_NAMES[int(raw) - 1] if raw.isdigit() else raw
+        # Guard the range so a stray "0" (or "9", "-1") doesn't index into PROFILE_NAMES[-1]
+        # (Apocalyptic) and silently drop the player into the hardest world.
+        profile = (PROFILE_NAMES[int(raw) - 1]
+                   if raw.isdigit() and 1 <= int(raw) <= len(PROFILE_NAMES) else raw)
         get_profile(profile)
     except (ValueError, IndexError):
         profile = "Normal"
@@ -604,7 +627,27 @@ def _prompt_new_world(universe) -> World:
     return World.new(universe, world_seed=seed, profile=profile, starting_cash=cash, fee_level=fee_level)
 
 
+def _session_fingerprint(app) -> tuple:
+    """A cheap snapshot of the mutable world state — used to tell whether a session actually
+    changed anything, so a read-only peek doesn't clobber the shared autosave slot."""
+    pf = app.world.portfolio
+    return (
+        app.world.market.tick_index,
+        round(pf.cash, 6),
+        round(pf.loan_balance(), 6),
+        tuple(sorted((aid, round(p.quantity, 8)) for aid, p in pf.positions.items())),
+    )
+
+
 def repl() -> None:
+    # Never let a non-UTF-8 stdout (the default when piped or on a legacy Windows code page)
+    # crash on the sparklines / em-dashes / emoji the UI prints.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    setup_logging(install_hooks=False)          # command errors log to logs/trader_pro.log
     universe = load_seed_universe()
     print(col("Welcome to Trader PRO.", C.BOLD + C.CYAN))
     choice = input("  [n]ew world or [l]oad a save? [n]: ").strip().lower()
@@ -616,6 +659,7 @@ def repl() -> None:
         app = TraderApp(_prompt_new_world(universe), universe=universe)
     print("\n" + app.execute("market"))
     print(col("\nType 'help' for commands.\n", C.DIM))
+    start_fp = _session_fingerprint(app)
     while app.running:
         try:
             line = input(col("trader> ", C.BOLD))
@@ -625,6 +669,16 @@ def repl() -> None:
         out = app.execute(line)
         if out:
             print(out)
+    # Autosave on the way out so a session is never silently lost — but only if the world
+    # actually changed, so a read-only peek (look/market/quit) never clobbers the shared
+    # `autosave` slot the TUI and GUI resume from. When it does write, relaunching any
+    # front-end resumes right where this game left off.
+    if _session_fingerprint(app) != start_fp:
+        try:
+            save_game(app.world, autosave_path(SAVES_DIR), label="autosave")
+            print(col("  · autosaved → autosave.world", C.DIM))
+        except Exception as exc:
+            log_error(exc, "autosave on quit")
 
 
 if __name__ == "__main__":

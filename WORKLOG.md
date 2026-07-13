@@ -1144,3 +1144,59 @@ a grouped 7-figure holding (`1,713,205.88`, 12 chars) overflows it and nudges th
 already fragile under `:g`; fold the column-width fix into Tier 3's alignment work.
 
 Commit is local — not pushed.
+
+## 2026-07-13 — Polish pass Tier 2 (safety & never-crash)
+
+Five safety fixes so a bug, a bad keystroke, or a stray quit can't hurt the player.
+
+**1 · CLI never-crash.** The CLI had no guard (the GUI got one last week). Two real tracebacks
+closed: (a) a non-UTF-8 stdout — the *default* when piped or on a legacy Windows code page —
+crashed the first `market` render on the sparklines/em-dashes; `repl()` now
+`sys.stdout.reconfigure(encoding="utf-8", errors="replace")` (and stderr) up front. (b) Any handler
+exception killed the whole REPL; `execute()` now wraps dispatch, logs via `errlog.log_error` to the
+same `logs/trader_pro.log` the GUI uses, and returns a friendly one-liner (KeyboardInterrupt /
+SystemExit still pass through). `_run` specifically: guards the delay parse (`run 5 abc` → usage,
+not `ValueError`) and catches Ctrl-C mid-run to stop cleanly and return to the prompt. Used
+`setup_logging(install_hooks=False)` for the CLI — the dispatch guard covers the real surface and I'd
+rather a genuinely-uncaught error still show a traceback than vanish silently.
+
+**2 · Onboarding profile `0`.** `PROFILE_NAMES[int("0")-1]` → `[-1]` = Apocalyptic (hardest), and it
+validated clean so no fallback. Now range-checked `1..len`, so `0` / `9` / `-1` all fall back to
+Normal; valid `1..8` unchanged.
+
+**3 · CLI autosave on exit.** The CLI never autosaved — quit lost an in-progress game. Now `repl()`
+autosaves to the shared `autosave` slot on the way out **iff the world actually changed** (a cheap
+`_session_fingerprint` of tick/cash/loans/positions, captured at start and compared at exit). The
+gate matters: without it a read-only peek (`look`/`market`/`quit`) would clobber the shared autosave
+the TUI/GUI resume from — I proved that to myself the hard way (see incident note). With the gate,
+only a session that traded or advanced time writes.
+
+**4 · TUI `+`/`_` footgun.** Bare `+`/`_` were bound to buy/sell **1000** while the help *and* the
+action docstrings described buy/sell **1** with **Ctrl** for the big lot. On a US keyboard `+` is
+Shift+`=`, so a stray Shift turned a 1-unit buy into 1000. Fixed the bindings to match the docs:
+`+`/`_` = 1 unit (like `=`/`-`); the 1000-lot moved to `ctrl+equals_sign`/`ctrl+plus`/`ctrl+minus`/
+`ctrl+underscore` (Textual 0.71 canonical names, verified accepted). Help text already correct — no
+edit needed. (Ctrl+punctuation delivery is terminal-dependent; the dialog remains the reliable path
+for arbitrary amounts. The point was removing the bare-key footgun.)
+
+**5 · GUI delete-save confirmation.** `LoadDialog._delete` destroyed a slot on one click; now gated
+behind `QMessageBox.question` (default focus **No**), naming the slot. Brings it to parity with the
+TUI's existing `_pending_delete` guard.
+
+**Tests.** +4 in `tests/test_cli.py` (bad-delay usage, handler-error caught not raised, profile-`0`
+→ Normal incl. boundaries, fingerprint tracks change). Full suite **109 pass** (was 105). Verified
+live: piped CLI no longer tracebacks and `run 5 abc` → usage; profile `0` → a Normal world; the
+autosave gate proven against a temp dir (read-only writes nothing; trade/advance writes).
+
+**Incident (honest note).** While verifying autosave I ran the real CLI to quit, which — working as
+designed — autosaved and **overwrote `saves/autosave.world`** with a fresh blank game; its prior
+contents are unrecoverable (atomic replace, gitignored). Named saves were untouched (incl.
+`save.world`, tick 40801 ≈ $1.65M). Low real loss, but I overwrote a file I hadn't inspected — should
+have targeted a temp dir from the start (which the gate re-verification now does). Left the blank
+`autosave.world` in place for Matthew to decide on. This incident is *why* the fingerprint gate went
+in — it's a genuine improvement, not just test hygiene.
+
+**Deferred to Tier 3** (load-flow polish, kept out of Tier 2's safety scope): pre-`load` snapshot so
+a mistyped `load` is recoverable, and bare `load` silently loading a stale `save` slot.
+
+Commit is local — not pushed.

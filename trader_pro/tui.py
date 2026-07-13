@@ -581,9 +581,13 @@ class TraderTUI(App):
         Binding("ctrl+9", "toggle_column('pnl')", "Col P&L%", show=False),
         ("question_mark", "help", "Help"),
         Binding("=", "buy_one", "Buy 1", show=False),
+        Binding("+", "buy_one", "Buy 1", show=False),      # + is shift+=, so keep it the SAFE 1-lot
         Binding("-", "sell_one", "Sell 1", show=False),
-        Binding("+", "buy_1000", "Buy 1000", show=False),
-        Binding("underscore", "sell_1000", "Sell 1000", show=False),
+        Binding("underscore", "sell_one", "Sell 1", show=False),
+        Binding("ctrl+equals_sign", "buy_1000", "Buy 1000", show=False),   # Ctrl = the big lot
+        Binding("ctrl+plus", "buy_1000", "Buy 1000", show=False),
+        Binding("ctrl+minus", "sell_1000", "Sell 1000", show=False),
+        Binding("ctrl+underscore", "sell_1000", "Sell 1000", show=False),
         ("q", "quit", "Quit"),
         Binding("ctrl+c", "force_quit", "Quit", priority=True),
         Binding("ctrl+q", "force_quit", "Quit", priority=True),
