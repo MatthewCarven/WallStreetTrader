@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import namedtuple
 
-from ..cli import TraderApp, fmt_clock, money
+from ..cli import TraderApp, fmt_clock, money, fmt_qty
 from ..core import AssetKind, World, load_seed_universe
 from ..core.engine import DAY, HOUR, WEEK
 from ..core.orders import fee_rate
@@ -179,7 +179,7 @@ def cell(ctx: RowCtx, col_id: str) -> Cell:
         return Cell(f"{ctx.chg31d:+.2f}%", GREEN if ctx.chg31d >= 0 else RED, True, False)
     if col_id == "pos":
         color = AMBER if ctx.qty < 0 else (FG if ctx.qty else DIM)
-        return Cell(f"{ctx.qty:g}" if ctx.qty else "·", color, True, False)
+        return Cell(fmt_qty(ctx.qty) if ctx.qty else "·", color, True, False)
     if col_id == "value":
         color = GREEN if ctx.value > 0 else (RED if ctx.value < 0 else DIM)
         return Cell(money(ctx.value) if ctx.value else "·", color, True, False)
@@ -353,7 +353,7 @@ def margin_color(fill: float) -> tuple:
 
 def margin_call_message(closures) -> str:
     """Readable summary of forced margin liquidations (liquidate_for_margin results) for the popup."""
-    lines = [f"• force-sold {c.order.quantity:g} {c.order.asset_id.split(':', 1)[1]} "
+    lines = [f"• force-sold {fmt_qty(c.order.quantity)} {c.order.asset_id.split(':', 1)[1]} "
              f"@ {money(c.price)}   (P&L {c.realized_pnl:+,.2f})" for c in closures]
     return ("The market moved against your leverage. To restore your maintenance margin the broker "
             "liquidated:\n\n" + "\n".join(lines))
@@ -419,7 +419,7 @@ def event_entry(event) -> tuple:
 def closure_entry(closure) -> tuple:
     """(text, colour) for a forced margin liquidation in the news feed."""
     c = closure
-    return (f"⚠ MARGIN CALL — closed {c.order.quantity:g} {c.order.asset_id.split(':', 1)[1]} "
+    return (f"⚠ MARGIN CALL — closed {fmt_qty(c.order.quantity)} {c.order.asset_id.split(':', 1)[1]} "
             f"@ {money(c.price)} (P&L {c.realized_pnl:+,.2f})", RED)
 
 
@@ -433,7 +433,7 @@ def fill_entry(verb: str, qty: float, sym: str, res) -> tuple:
     if res.realized_pnl:
         extra += f"   realized {money(res.realized_pnl)}"
     color = {"buy": GREEN, "sell": RED, "short": AMBER, "cover": GREEN_HI}.get(verb, FG)
-    return (f"{verb.upper()} {qty:g} {sym} @ {money(res.price)}{extra}", color)
+    return (f"{verb.upper()} {fmt_qty(qty)} {sym} @ {money(res.price)}{extra}", color)
 
 
 def save_info_line(info) -> str:

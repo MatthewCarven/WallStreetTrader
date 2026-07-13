@@ -23,6 +23,7 @@ from .core import (
     PROFILE_NAMES, get_profile,
 )
 from .core.engine import DAY, HOUR
+from .fmt import money, fmt_qty
 from .persistence import SAVES_DIR, save_game, load_game, slot_path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,10 +45,6 @@ def _color_enabled() -> bool:
 
 def col(s: str, c: str) -> str:
     return f"{c}{s}{C.RESET}" if _color_enabled() else s
-
-
-def money(x: float) -> str:
-    return f"${x:,.2f}"
 
 
 def signed_pct(p0: float, p1: float) -> str:
@@ -272,7 +269,7 @@ class TraderApp:
                          f"anchor strength {meta.fundamental_strength:.0%}")
         held = self.world.portfolio.positions.get(aid)
         if held:
-            lines.append(col(f"  you hold {held.quantity:g} @ avg {money(held.avg_cost)}", C.DIM))
+            lines.append(col(f"  you hold {fmt_qty(held.quantity)} @ avg {money(held.avg_cost)}", C.DIM))
         return "\n".join(lines)
 
     def _parse_qty(self, aid: str, token: str) -> float | None:
@@ -302,7 +299,7 @@ class TraderApp:
         res = execute_order(self.world, Order(aid, OrderSide.BUY, qty))
         if res.filled:
             fee_txt = f"  fee {money(res.fee)}" if res.fee else ""
-            return col(f"bought {qty:g} {args[0].upper()} @ {money(res.price)} "
+            return col(f"bought {fmt_qty(qty)} {args[0].upper()} @ {money(res.price)} "
                        f"(−{money(-res.cash_delta)}{fee_txt})  cash {money(self.world.portfolio.cash)}", C.GREEN)
         return col(f"order rejected: {res.message}", C.RED)
 
@@ -318,7 +315,7 @@ class TraderApp:
         res = execute_order(self.world, Order(aid, OrderSide.SELL, qty))
         if res.filled:
             pnl = col(f"{res.realized_pnl:+,.2f}", C.GREEN if res.realized_pnl >= 0 else C.RED)
-            return col(f"sold {qty:g} {args[0].upper()} @ {money(res.price)} "
+            return col(f"sold {fmt_qty(qty)} {args[0].upper()} @ {money(res.price)} "
                        f"(+{money(res.cash_delta)}) realized P&L {pnl}  "
                        f"cash {money(self.world.portfolio.cash)}", C.GREEN)
         return col(f"order rejected: {res.message}", C.RED)
@@ -339,7 +336,7 @@ class TraderApp:
                 pnlpct = (pnl / basis * 100) if basis else 0
                 pnls = col(f"{pnl:+,.2f} ({pnlpct:+.1f}%)", C.GREEN if pnl >= 0 else C.RED)
                 tag = col(" SHORT", C.YELLOW) if pos.quantity < 0 else ""
-                out.append(f"  {aid.split(':',1)[1]:<11}{pos.quantity:>10g}{money(pos.avg_cost):>12}"
+                out.append(f"  {aid.split(':',1)[1]:<11}{fmt_qty(pos.quantity):>10}{money(pos.avg_cost):>12}"
                            f"{money(price):>12}{money(val):>13}{pnls:>26}{tag}")
         hv = pf.holdings_value(po)
         out.append("")
@@ -373,7 +370,7 @@ class TraderApp:
         lines = [col("  ⚠ MARGIN CALL — forced liquidation:", C.RED)]
         for r in closures:
             sym = r.order.asset_id.split(":", 1)[1]
-            lines.append(col(f"     closed {r.order.quantity:g} {sym} @ {money(r.price)} "
+            lines.append(col(f"     closed {fmt_qty(r.order.quantity)} {sym} @ {money(r.price)} "
                              f"(P&L {r.realized_pnl:+,.2f})", C.RED))
         return "\n" + "\n".join(lines)
 
@@ -530,7 +527,7 @@ class TraderApp:
             return "invalid quantity"
         res = execute_order(self.world, Order(aid, OrderSide.SELL, qty))
         if res.filled:
-            return col(f"shorted {qty:g} {args[0].upper()} @ {money(res.price)} "
+            return col(f"shorted {fmt_qty(qty)} {args[0].upper()} @ {money(res.price)} "
                        f"(+{money(res.cash_delta)})  cash {money(self.world.portfolio.cash)}", C.YELLOW)
         return col(f"order rejected: {res.message}", C.RED)
 
@@ -553,7 +550,7 @@ class TraderApp:
         res = execute_order(self.world, Order(aid, OrderSide.BUY, qty))
         if res.filled:
             pnl = col(f"{res.realized_pnl:+,.2f}", C.GREEN if res.realized_pnl >= 0 else C.RED)
-            return col(f"covered {qty:g} {args[0].upper()} @ {money(res.price)} "
+            return col(f"covered {fmt_qty(qty)} {args[0].upper()} @ {money(res.price)} "
                        f"realized {pnl}  cash {money(self.world.portfolio.cash)}", C.GREEN)
         return col(f"order rejected: {res.message}", C.RED)
 

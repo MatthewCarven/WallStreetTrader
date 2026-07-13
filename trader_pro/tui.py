@@ -23,7 +23,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, Static
 from rich.text import Text
 
-from .cli import TraderApp
+from .cli import TraderApp, money, fmt_qty
 from .core import AssetKind, Order, OrderSide, World, execute_order, load_seed_universe
 from .core.engine import DAY, HOUR, WEEK
 from .core.orders import fee_rate
@@ -47,10 +47,6 @@ AUTOSAVE_SECS = 30             # wall-clock throttle for periodic autosave while
 GREEN = "#2fae4e"
 GREEN_HI = "#38c172"
 AMBER = "#ffb000"
-
-
-def money(x: float) -> str:
-    return f"${x:,.2f}"
 
 
 def fmt_clock(t: int) -> str:
@@ -227,7 +223,7 @@ class TradeDialog(ModalScreen):
         info = Text()
         info.append(f"{self.aid.split(':',1)[1]}  {w.name_of(self.aid)}\n", style="bold")
         info.append(f"price {money(w.price(self.aid))}\n")
-        info.append(f"you hold {held:g}    cash {money(w.portfolio.cash)}\n", style="dim")
+        info.append(f"you hold {fmt_qty(held)}    cash {money(w.portfolio.cash)}\n", style="dim")
         info.append(f"buying power {money(w.portfolio.buying_power(w.price_of))}", style="dim")
         self.query_one("#trade-info", Static).update(info)
         self.query_one("#qty", Input).focus()
@@ -525,7 +521,7 @@ BOARD_COLUMNS = [
     ("chg31d", "31D %",
         lambda c: Text(f"{c.chg31d:+.2f}%", style="green" if c.chg31d >= 0 else "red", justify="right")),
     ("pos", "Pos",
-        lambda c: Text(f"{c.qty:g}" if c.qty else "·", justify="right",
+        lambda c: Text(fmt_qty(c.qty) if c.qty else "·", justify="right",
                        style="yellow" if c.qty < 0 else ("white" if c.qty else "dim"))),
     ("value", "Value",
         lambda c: Text(money(c.value) if c.value else "·", justify="right",
@@ -712,7 +708,7 @@ class TraderTUI(App):
     def _log_closures(self, closures) -> None:
         for c in closures:
             sym = c.order.asset_id.split(":", 1)[1]
-            self._log(Text(f"⚠ MARGIN CALL — closed {c.order.quantity:g} {sym} "
+            self._log(Text(f"⚠ MARGIN CALL — closed {fmt_qty(c.order.quantity)} {sym} "
                            f"@ {money(c.price)} (P&L {c.realized_pnl:+,.2f})", style="bold red"))
 
     # ---- shared math ---- #
@@ -972,7 +968,7 @@ class TraderTUI(App):
                 price = w.price(aid)
                 pnl = (price - pos.avg_cost) * pos.quantity
                 tag = " SHORT" if pos.quantity < 0 else ""
-                port.append(f"  {aid.split(':',1)[1]:<10}{pos.quantity:>9g}{tag}\n",
+                port.append(f"  {aid.split(':',1)[1]:<10}{fmt_qty(pos.quantity):>9}{tag}\n",
                             style="yellow" if pos.quantity < 0 else "")
                 port.append(f"    @{money(pos.avg_cost)} ", style="dim")
                 port.append(f"{pnl:+,.2f}\n", style="green" if pnl >= 0 else "red")
@@ -1111,7 +1107,7 @@ class TraderTUI(App):
             verb = "bought" if side == OrderSide.BUY else "sold"
             fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
             sym = aid.split(":", 1)[1]
-            self._log(Text(f"{verb} {qty:g} {sym} @ {money(res.price)}{fee_txt} "
+            self._log(Text(f"{verb} {fmt_qty(qty)} {sym} @ {money(res.price)}{fee_txt} "
                            f"(P&L {res.realized_pnl:+,.2f})", style="green"))
         else:
             self._log(Text(f"order rejected: {res.message}", style="red"))
@@ -1304,7 +1300,7 @@ class TraderTUI(App):
         if result is not None:
             verb, qty, sym, res = result
             fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
-            self._log(Text(f"{verb} {qty:g} {sym} @ {money(res.price)}{fee_txt} "
+            self._log(Text(f"{verb} {fmt_qty(qty)} {sym} @ {money(res.price)}{fee_txt} "
                            f"(P&L {res.realized_pnl:+,.2f})", style="green"))
         self._refresh(keep_row=result is not None)
 

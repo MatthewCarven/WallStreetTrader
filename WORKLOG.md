@@ -1096,3 +1096,51 @@ sim-clock and persisting the activity log across save/load were offered and decl
 `__str__`) + a smoke assertion that a slot whose body raises does not propagate. Verified end-to-end
 outside the suite that `logs/trader_pro.log` is created and the installed excepthook routes into it.
 Full suite **99 pass** (was 92). Commits `7f64c1d → d27fae2`, local — not pushed.
+
+## 2026-07-13 — Polish pass (multi-session): plan + Tier 1 (formatting)
+
+Matthew asked an open "what can we polish about the game?" Ran four parallel reviewers (GUI,
+TUI, gameplay, CLI/onboarding) over the whole play surface. Findings clustered into four tiers;
+Matthew picked **all of them**, so this is a multi-session pass, one tier per commit/rollback point.
+
+**The four tiers (roadmap for cold resume):**
+1. **Formatting** *(this commit — done)* — shared `money`/`qty` helpers.
+2. **Safety & never-crash** — CLI has no guard (unlike the GUI): raw traceback on non-UTF-8 stdout
+   (default when piped on Windows) and any handler exception (`run 5 abc`) kills the REPL; wrap
+   dispatch + reconfigure stdout to utf-8. GUI delete-save has no confirmation (one misclick = lost
+   game). CLI never autosaves (quit/load discards silently, contra README). TUI binds bare `+`/`_`
+   to buy/sell **1000** — contradicts help (says 1 unit; Ctrl for 1000) and a stray Shift 1000×'s an
+   order. Onboarding: profile prompt `0` → `PROFILE_NAMES[-1]` = Apocalyptic (validate `1..N`).
+3. **Feel & consistency** — empty-state placeholders (GUI+TUI blank tables), drop the "slice 9"
+   dev-jargon resume line, P&L columns missing the `$`, no sort ▲/▼ indicator, paused status hides
+   speed, off-theme pure-black ticker, port-table QTY column width (see Tier 1 note below).
+4. **Gameplay balance** *(design calls — confirm with Matthew first)* — margin debit accrues no
+   interest (free leverage; loans strictly dominated); loan limit/APR are per-loan not aggregate
+   (tier-dodging); bonds never pay their coupon (dead "safe yield"); margin call force-closes the
+   whole largest position instead of trimming to cure; prediction confidence ignores horizon and is
+   underpriced; no milestones/run-stats though `nw_history` already holds the data.
+
+### Tier 1 — shared formatting helpers  ✅
+Two `money()` copies (cli + tui, both `f"${x:,.2f}"`) and ~19 quantity sites on `f"{q:g}"`.
+Three real defects, all rooted in shared code so one fix lands in every front-end:
+- **negatives** rendered `$-1,234.50` (dollar-then-minus) — now `-$1,234.50` (sign outside symbol);
+- **sub-cent assets** collapsed to `$0.00` — the game's penny coins (~$0.00006) now keep ~4 sig figs
+  (`$0.00005837`), so they're legible and distinct in `look`/board/fills;
+- **large quantities** printed scientific (`1.7132e+06`) — now grouped (`1,713,205.88`), never `e+`.
+
+New `trader_pro/fmt.py` (stdlib-only) owns `money(x)` and `fmt_qty(q)` (named `fmt_qty`, not `qty`,
+because the front-ends already use `qty` as the numeric local it formats; `fmt_qty` scales decimals
+by magnitude — 2dp ≥1, up to 6 for sub-unit crypto). `cli.py` and `tui.py` dropped their local
+`money`; `cli` re-exports both so the existing GUI imports (`from ..cli import … money`) still
+resolve. All 19 share/coin sites moved from `:g` to `fmt_qty(...)` across cli/tui/gui; the two
+non-quantity `:g` uses (bond maturity `10y`, new-world cash default) left alone.
+
+**Tests.** New `tests/test_fmt.py` (6 cases: grouping, negative-sign, sub-cent, no-sci-notation,
+magnitude-scaled decimals, negative shorts) + fmt.py doctests (9). Full suite **105 pass** (was 99).
+Verified live in the CLI: `look FRG` → `$0.00005837`, `buy FRG $100` → `bought 1,713,205.88 FRG`.
+
+**Known nit deferred to Tier 3:** the CLI/TUI portfolio tables right-align QTY in a width-10 field;
+a grouped 7-figure holding (`1,713,205.88`, 12 chars) overflows it and nudges the AVG column. Was
+already fragile under `:g`; fold the column-width fix into Tier 3's alignment work.
+
+Commit is local — not pushed.

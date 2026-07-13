@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QTableView, QVBoxLayout, QWidget,
 )
 
-from ..cli import TraderApp, fmt_clock, money
+from ..cli import TraderApp, fmt_clock, money, fmt_qty
 from ..core import (
     PROFILE_NAMES, AssetKind, Order, OrderSide, World, execute_order, get_profile,
     make_prediction, quote_cost,
@@ -188,7 +188,7 @@ class PositionsModel(QAbstractTableModel):
         _aid, sym, qty, cost, value, pnl, pnlpct = self._rows[index.row()]
         col = POSITION_COLUMNS[index.column()][0]
         if role == Qt.DisplayRole:
-            return {"sym": sym, "qty": f"{qty:g}", "cost": money(cost), "value": money(value),
+            return {"sym": sym, "qty": fmt_qty(qty), "cost": money(cost), "value": money(value),
                     "pnl": f"{pnl:+,.2f}", "pnlpct": f"{pnlpct:+.2f}%"}[col]
         if role == Qt.ForegroundRole:
             if col == "qty":
@@ -267,7 +267,7 @@ class TradeDialog(QDialog):
         self.info.setText(
             f'<b>{aid.split(":", 1)[1]}  {w.name_of(aid)}</b><br>'
             f'price {money(w.price(aid))}<br>'
-            f'<span style="color:{DIM}">you hold {held:g}    cash {money(w.portfolio.cash)}<br>'
+            f'<span style="color:{DIM}">you hold {fmt_qty(held)}    cash {money(w.portfolio.cash)}<br>'
             f'buying power {money(w.portfolio.buying_power(w.price_of))}</span>'
         )
 
