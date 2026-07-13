@@ -18,9 +18,10 @@ import statistics as st
 from dataclasses import dataclass
 
 from .world import AssetKind, World
+from .profiles import get_profile
 
 DAY = 1440
-BASE_COST = 20.0
+BASE_COST = 50.0           # a peek should cost a meaningful bite, not pocket change (was 20)
 BASE_SIGMA = 0.16          # forecast noise at predictability 0, 1-day horizon
 
 # Median-ish reference market cap for the obscurity cost curve.
@@ -35,7 +36,8 @@ class Prediction:
     forecast: float         # noised predicted price at buy_tick + horizon
     sigma: float            # ~1σ relative uncertainty
     cost: float
-    confidence: float       # 0..1 (= world predictability), shown to the player
+    confidence: float       # 0..1, shown to the player — derived from the spread, so it falls
+                            # with horizon and in fuzzier worlds (not the flat world predictability)
 
     @property
     def direction(self) -> str:
@@ -63,12 +65,13 @@ def _obscurity_factor(world: World, asset_id: str) -> float:
 
 def quote_cost(world: World, asset_id: str, horizon: int) -> float:
     horizon_days = horizon / DAY
-    return round(BASE_COST * _obscurity_factor(world, asset_id) * (1.0 + 0.12 * horizon_days), 2)
+    edge = 0.5 + get_profile(world.config.profile).predictability   # sharper world -> pricier peek
+    return round(BASE_COST * _obscurity_factor(world, asset_id) * edge
+                 * (1.0 + 0.12 * horizon_days), 2)
 
 
 def make_prediction(world: World, engine, asset_id: str, horizon: int) -> Prediction:
     """Build (but do not charge for) a prediction. The CLI handles payment."""
-    from .profiles import get_profile
     t = world.market.tick_index
     predictability = get_profile(world.config.profile).predictability
     current = world.price(asset_id)
@@ -86,5 +89,6 @@ def make_prediction(world: World, engine, asset_id: str, horizon: int) -> Predic
 
     return Prediction(
         asset_id=asset_id, horizon=horizon, current=current, forecast=forecast,
-        sigma=sigma, cost=quote_cost(world, asset_id, horizon), confidence=predictability,
+        sigma=sigma, cost=quote_cost(world, asset_id, horizon),
+        confidence=math.exp(-sigma),      # high for a sharp near-term peek, lower as the band widens
     )

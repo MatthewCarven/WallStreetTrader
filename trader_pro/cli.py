@@ -506,7 +506,7 @@ class TraderApp:
         pf.cash -= pred.cost
         c = C.GREEN if pred.direction == "UP" else C.RED
         sym = args[0].upper()
-        return (col(f"🔮 forecast for {sym}  (paid {money(pred.cost)}, world confidence "
+        return (col(f"🔮 forecast for {sym}  (paid {money(pred.cost)}, confidence "
                     f"{pred.confidence:.0%})", C.CYAN)
                 + "\n" + f"   now {money(pred.current)}  →  in {self._fmt_horizon(horizon)}: "
                 + col(f"~{money(pred.forecast)} ({pred.direction})", c)

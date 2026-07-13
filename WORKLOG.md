@@ -1260,7 +1260,7 @@ coupons never credited).
 Steps (each: engine change + tests + verify):
 - **1 · Debt economics** ✅ — margin carry + aggregate loans.
 - **2 · Bond coupons** ✅ — pay coupon income as cash (price-smoothing #8 deliberately deferred).
-- **3 · Predictions** — confidence falls with horizon; cost scales with volatility/edge.
+- **3 · Predictions** ✅ — confidence falls with horizon; cost scales with the world's edge.
 - **4 · Gentler margin calls** — trim only enough to cure the breach, not the whole largest position.
 - **5 · Milestones / run-stats** — peak net worth, max drawdown, best/worst day, swans survived.
 
@@ -1292,5 +1292,17 @@ step at anniversaries (that step is the *correct* ex-coupon drop once coupons ar
 to continuous-compounding annuity pricing shifts par off-face at seed (~+1.6% on a 30y 4.5% bond),
 which would look wrong. Left the price formula untouched (zero risk to existing bond behavior); the
 income is the valuable part and it's in.
+
+### Step 3 — predictions: honest confidence + real price ✅
+`predictions.py`: (a) the displayed **confidence** was the flat world `predictability` — a 30-day peek
+read as sure as a 1-day one. Now `confidence = exp(-sigma)`, derived from the *actual* forecast
+spread, so it falls with horizon and in fuzzier worlds (Normal 1d 94% → 30d 72%; Apocalyptic 1d 87%
+→ 30d 47%). CLI label "world confidence" → "confidence". (b) **cost** was pocket change (~$11). Raised
+`BASE_COST` 20 → 50 and added an `edge = 0.5 + predictability` multiplier, so a sharper world's peek
+(worth more) costs more: same 1-day stock peek Calm $169 > Normal $133 > Apocalyptic $76; a mega-cap
+is ~$28, crypto ~$157. Uniform ~2.5× over the old flat cost, × the world factor — a meaningful bite,
+not a near-oracle for free. All relative-cost orderings and determinism preserved (edge is
+world-level). `test_predictions.py` +2 (confidence falls with horizon; cost scales with edge). 6
+prediction tests pass. `BASE_COST`/`edge` are one-liners to retune if it plays too steep.
 
 Commit is local — not pushed.

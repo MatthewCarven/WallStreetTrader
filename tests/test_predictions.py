@@ -58,6 +58,24 @@ def test_longer_horizon_costs_more_and_is_fuzzier() -> None:
     assert long.sigma > short.sigma
 
 
+# --- Tier 4: horizon-aware confidence + edge-scaled cost --- #
+
+def test_confidence_falls_with_horizon() -> None:
+    w = World.new(U, SEED, profile="Normal"); e = MarketEngine(w)
+    aid = make_asset_id(AssetKind.STOCK, U.stocks[0].symbol)
+    near = make_prediction(w, e, aid, DAY)
+    far = make_prediction(w, e, aid, 30 * DAY)
+    assert 0 < far.confidence < near.confidence <= 1.0   # a longer peek is less sure
+
+
+def test_cost_scales_with_world_edge() -> None:
+    aid = make_asset_id(AssetKind.STOCK, U.stocks[0].symbol)
+    calm = World.new(U, SEED, profile="Calm")
+    apoc = World.new(U, SEED, profile="Apocalyptic")
+    # a sharper world's peek is worth more, so it costs more for the same asset/horizon
+    assert quote_cost(calm, aid, DAY) > quote_cost(apoc, aid, DAY)
+
+
 if __name__ == "__main__":
     for n, f in sorted(globals().items()):
         if n.startswith("test_") and callable(f):
