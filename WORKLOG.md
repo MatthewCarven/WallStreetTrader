@@ -1364,3 +1364,35 @@ This closes every item from the four-tier polish pass except the two deliberatel
 niceties (bond price-smoothing #8, prediction best/worst-day).
 
 Commit is local — not pushed.
+
+## 2026-07-14 — Standalone .exe build (PyInstaller)
+
+Matthew asked for a build script to package the game as a Windows `.exe`, documented in the README.
+The catch: three runtime paths resolved off `__file__`, which **breaks when frozen** — the seed data
+wouldn't be found (crash on launch) and `saves/`/`logs/` would land in PyInstaller's temp `_MEIPASS`
+dir and vanish on exit. So a *working* build needed the path handling fixed first, not just a script.
+
+**Frozen-aware paths.** New `trader_pro/_paths.py` with `resource_dir()` (read-only bundled data —
+`_MEIPASS` when frozen, repo root from source) and `user_data_dir()` (writable state — next to the
+`.exe` when frozen, repo root from source). Routed the three sites through it: `models.DEFAULT_SEED_DIR`
+(seeds), `persistence.SAVES_DIR` (saves), `errlog` log path. **From-source behaviour is byte-identical**
+(both helpers return the repo root), so nothing changed in dev — 126 tests still green.
+
+**Build script.** `scripts/build_exe.py` runs PyInstaller `--onefile --windowed --name TraderPro`,
+bundling `data/seeds` via an absolute `--add-data` path (a relative one resolves against `--specpath`,
+which bit me first try). Guards for missing PyInstaller / unbuilt seeds; optional `trader_pro.ico`.
+Output is a portable `dist/TraderPro.exe` that keeps saves beside itself. Kept the script's own output
+**ASCII-only** so it can't `UnicodeEncodeError` on its success line on a cp1252 console (same bug class
+as the Tier-2 CLI fix).
+
+**Verified for real.** Rather than the slow, un-headless-testable GUI build, I built a *CLI* one-file
+exe (same `_paths` logic, stdlib-only) into scratch and ran it: `market` rendered and `buy BTR $500`
+filled (bundled seeds found via `resource_dir()` → `_MEIPASS`), and `frozentest.world` + `autosave.world`
+were written to `dist/saves/` **next to the exe** (`user_data_dir()`). The GUI exe uses identical path
+logic, so it's proven bar the Qt bundle.
+
+`.gitignore` already had `build/`/`dist/`; added `*.spec`. README gained a "Standalone Windows build"
+section. `test_persistence.py` +1 (from-source paths resolve to the repo root, seeds present). Full
+suite **127 pass** (was 126). PyInstaller isn't a runtime dep — only needed to build.
+
+Commit is local — not pushed.

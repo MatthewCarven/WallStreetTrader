@@ -17,6 +17,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
+from .._paths import resource_dir
+
 
 # --------------------------------------------------------------------------- #
 # Seed record types
@@ -95,8 +97,8 @@ class SeedUniverse:
         )
 
 
-# Default location of the generated seed files: <repo>/data/seeds
-DEFAULT_SEED_DIR = Path(__file__).resolve().parents[2] / "data" / "seeds"
+# Default location of the generated seed files: <repo>/data/seeds (or _MEIPASS/data/seeds frozen)
+DEFAULT_SEED_DIR = resource_dir() / "data" / "seeds"
 
 
 def _load_json(path: Path) -> list[dict[str, Any]]:

@@ -85,6 +85,16 @@ def test_autosave_helpers(tmp_path: Path) -> None:
     assert info.is_autosave
 
 
+def test_paths_resolve_to_repo_root_from_source() -> None:
+    # From source (not frozen), resources and writable state both live under the repo root, so the
+    # PyInstaller frozen-path indirection is invisible in dev.
+    from trader_pro._paths import resource_dir, user_data_dir, is_frozen
+    assert not is_frozen()
+    assert resource_dir() == ROOT and user_data_dir() == ROOT
+    assert (resource_dir() / "data" / "seeds").exists()      # seeds where the loader looks
+    assert P.SAVES_DIR == ROOT / "saves"
+
+
 if __name__ == "__main__":
     d = Path(tempfile.mkdtemp())
     for fn in (test_save_embeds_meta_and_roundtrips, test_list_saves_newest_first,

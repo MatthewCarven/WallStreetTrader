@@ -96,6 +96,22 @@ your last game and autosaves exactly like the TUI (they share the `saves/` slots
 > PySide6 ships stable-ABI wheels, so it installs on current Pythons (including 3.14). It's an
 > optional extra — the core game, CLI and TUI don't need it.
 
+### Standalone Windows build (`.exe`)
+
+Package the desktop GUI into a single, portable `TraderPro.exe` with PyInstaller:
+
+```bash
+pip install pyinstaller PySide6 pyqtgraph
+python scripts/build_exe.py
+```
+
+The build lands at **`dist/TraderPro.exe`** — a one-file, windowed build with the seed universe
+bundled in. It's **portable**: drop the `.exe` in a folder and it writes its `saves/` and `logs/`
+right beside itself, so your games persist and travel with the executable (the path handling lives in
+[`trader_pro/_paths.py`](trader_pro/_paths.py)). First launch self-extracts and takes a few seconds;
+the file is ~150 MB because it packs the Python runtime and Qt. Drop a `trader_pro.ico` in the repo
+root to give it an icon. `build/`, `dist/` and the generated `.spec` are gitignored.
+
 ## Commands
 
 Both front-ends share the same command set (in the TUI, press `:` first):

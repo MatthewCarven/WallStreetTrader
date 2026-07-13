@@ -21,9 +21,10 @@ from pathlib import Path
 from typing import Any
 
 from .core import World, load_world
+from ._paths import user_data_dir
 
 # repo-root/saves  (this file is trader_pro/persistence.py)
-SAVES_DIR = Path(__file__).resolve().parents[1] / "saves"
+SAVES_DIR = user_data_dir() / "saves"        # <repo>/saves from source; beside the .exe when frozen
 EXT = ".world"
 AUTOSAVE_SLOT = "autosave"
 

@@ -23,6 +23,8 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from ._paths import user_data_dir
+
 log = logging.getLogger("trader_pro")
 
 try:                                       # the vendored handler is stdlib-only; this shouldn't fail
@@ -99,7 +101,7 @@ def setup_logging(path: Optional[os.PathLike | str] = None, *, level: int = logg
     twice will not double-add the file handler. Returns the log-file path. Never raises."""
     try:
         if path is None:
-            path = Path(__file__).resolve().parents[1] / "logs" / "trader_pro.log"
+            path = user_data_dir() / "logs" / "trader_pro.log"
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         tag = str(path)
