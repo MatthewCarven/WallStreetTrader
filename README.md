@@ -24,6 +24,11 @@ feature parity). V2 web and V3 (multiplayer) are designed but not built — see 
 
 ## Quick start
 
+Windows "Binary"
+https://drive.google.com/file/d/1W5Ch81r-Ccb0XSfLX0GXd6P4t_mLps2Z/view?usp=sharing
+<img width="1920" height="1041" alt="image" src="https://github.com/user-attachments/assets/16dae5e7-1f02-424b-9a78-c05f759d891f" />
+
+
 The core game needs **Python 3.10+** and nothing else — the engine, CLI, and save/load use
 only the standard library.
 
