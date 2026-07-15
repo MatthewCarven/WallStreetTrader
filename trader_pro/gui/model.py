@@ -29,15 +29,49 @@ CHART_RANGES = [("1H", HOUR), ("1D", DAY), ("3D", 3 * DAY), ("1W", WEEK)]
 BG = "#07120b"
 PANEL = "#0d1f14"
 FG = "#b8f0c0"
+# Fixed P&L semantics: profit / up is green, loss / down is red — kept independent of the theme
+# accent below, so even a blue or red theme still shows gains in green and losses in red (the
+# universal trading convention). Change the *accent*, not these, to reskin the app.
 GREEN = "#2fae4e"
 GREEN_HI = "#38c172"
 RED = "#e5484d"
 AMBER = "#ffb000"
 DIM = "#7c8a80"
-# Board row-highlight. A dimmed GREEN so a whole selected row isn't glary — this is the knob to
-# tweak. #1c682f ≈ 0.60x GREEN (47,174,78 -> 28,104,47). Darker: halve GREEN -> #185727. Brighter:
-# back toward GREEN #2fae4e.
-SELECTION = "#1c682f"
+
+
+def _scale_hex(hex_color: str, factor: float) -> str:
+    """Multiply a ``#rrggbb`` colour's channels by ``factor`` (clamped to 0–255): >1 brightens,
+    <1 dims. Used to derive the accent's highlight and row-selection shades from one picked colour."""
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    r, g, b = (max(0, min(255, round(c * factor))) for c in (r, g, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def accent_palette(accent: str | None) -> tuple[str, str, str]:
+    """Resolve ``(ACCENT, ACCENT_HI, SELECTION)`` for the theme.
+
+    ``None`` keeps the hand-tuned phosphor-green defaults. A custom accent derives a brighter
+    highlight (×1.2) and a dimmed board row-selection (×0.6 — which reproduces the original
+    ``#1c682f`` exactly for the default green, so nothing shifts unless you actually pick a colour).
+    """
+    if not accent:
+        return "#2fae4e", "#38c172", "#1c682f"
+    return accent, _scale_hex(accent, 1.2), _scale_hex(accent, 0.6)
+
+
+def _saved_accent() -> str | None:
+    """The user's saved accent colour, or None. Defensive: never raises at import time."""
+    try:
+        from .settings import accent_color
+        return accent_color()
+    except Exception:
+        return None
+
+
+# Theme accent — the app's chrome (panel/dialog borders, menu highlights, command line, the
+# TRADER PRO banner, board row selection). Defaults to phosphor green; user-themeable via the
+# Appearance menu (see gui/settings.py). Resolved once at import, so it applies on the next launch.
+ACCENT, ACCENT_HI, SELECTION = accent_palette(_saved_accent())
 
 
 def steps_for(elapsed: float, ticks_per_sec: float, accum: float) -> tuple[int, float]:
@@ -87,7 +121,7 @@ def header_html(world: World) -> str:
     sp = "&nbsp;&nbsp;&nbsp;"
 
     line1 = (
-        _span("TRADER PRO", GREEN_HI, bold=True) + "&nbsp;&nbsp;"
+        _span("TRADER PRO", ACCENT_HI, bold=True) + "&nbsp;&nbsp;"
         + _span(f"seed {w.config.world_seed} · {w.config.profile} · "
                 f"{fmt_clock(w.market.tick_index)}", DIM)
     )

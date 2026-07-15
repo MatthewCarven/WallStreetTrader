@@ -20,7 +20,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog, QDialogButtonBox,
+    QAbstractItemView, QApplication, QButtonGroup, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSplitter,
     QTableView, QVBoxLayout, QWidget,
@@ -37,8 +37,9 @@ from ..persistence import (
     AUTOSAVE_SLOT, SAVES_DIR, autosave_path, delete_save, list_saves, load_game, save_game,
     slot_path,
 )
+from .settings import clear_accent_color, set_accent_color
 from .model import (
-    AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
+    ACCENT, ACCENT_HI, AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
     PANEL, POSITION_COLUMNS, RED, SELECTION, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
     closure_entry, default_watchlist, event_entry, fill_entry, header_html, kind_ids,
     margin_call_message,
@@ -283,7 +284,7 @@ class TradeDialog(QDialog):
         self.setStyleSheet(
             f"QDialog {{ background: {BG}; }}"
             f"QLabel {{ color: {FG}; }}"
-            f"QLineEdit {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f"QLineEdit {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
             f" padding: 5px; border-radius: 4px; }}"
             f"QPushButton {{ background: {PANEL}; color: {FG}; }}"
             f"QPushButton:hover {{ background: {BG}; }}"
@@ -355,8 +356,8 @@ class LoadDialog(QDialog):
         layout.addLayout(buttons)
         self.setStyleSheet(
             f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
-            f"QListWidget {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN}; }}"
-            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f"QListWidget {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT}; }}"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
             f" padding: 5px 14px; border-radius: 4px; }}"
         )
         self._fill()
@@ -430,9 +431,9 @@ class NewWorldDialog(QDialog):
         form.addRow(bb)
         self.setStyleSheet(
             f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
-            f"QLineEdit, QComboBox {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f"QLineEdit, QComboBox {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
             f" padding: 4px; border-radius: 4px; }}"
-            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
             f" padding: 5px 14px; border-radius: 4px; }}"
         )
 
@@ -503,9 +504,9 @@ class PredictDialog(QDialog):
         layout.addLayout(buttons)
         self.setStyleSheet(
             f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
-            f"QComboBox {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f"QComboBox {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
             f" padding: 4px; border-radius: 4px; }}"
-            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
             f" padding: 5px 14px; border-radius: 4px; }}"
         )
         self._refresh_info()
@@ -573,7 +574,7 @@ class HelpDialog(QDialog):
         layout.addWidget(close_b)
         self.setStyleSheet(
             f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
-            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
             f" padding: 5px 14px; border-radius: 4px; }}"
         )
 
@@ -642,6 +643,11 @@ class TraderGUI(QMainWindow):
         for level in FEE_LEVELS:
             fee_act = fees_menu.addAction(level)
             fee_act.triggered.connect(lambda _checked=False, lv=level: self.set_fee(lv))
+        appearance_menu = self.menuBar().addMenu("Appearance")
+        act_accent = appearance_menu.addAction("Accent colour…")
+        act_accent.triggered.connect(self.action_pick_accent)
+        act_reset_accent = appearance_menu.addAction("Reset accent to green")
+        act_reset_accent.triggered.connect(self.action_reset_accent)
         help_act = self.menuBar().addMenu("Help").addAction("Shortcuts & commands")
         help_act.setShortcut("?")
         help_act.triggered.connect(self.show_help)
@@ -898,7 +904,7 @@ class TraderGUI(QMainWindow):
         self.news.setSelectionMode(QAbstractItemView.NoSelection)
         self.news.setFocusPolicy(Qt.NoFocus)
         self.news.setStyleSheet(
-            f"QListWidget {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN}; }}")
+            f"QListWidget {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT}; }}")
         root.addWidget(self.news)
 
         self.command_line = QLineEdit()
@@ -907,7 +913,7 @@ class TraderGUI(QMainWindow):
             "press :  —  predict NVDA 1d · loan 1000 · repay all · fees high · find tesla · help")
         self.command_line.returnPressed.connect(self._run_command)
         self.command_line.setStyleSheet(
-            f"background: {PANEL}; color: {FG}; border: 1px solid {GREEN_HI}; padding: 4px;")
+            f"background: {PANEL}; color: {FG}; border: 1px solid {ACCENT_HI}; padding: 4px;")
         root.addWidget(self.command_line)
         QShortcut(QKeySequence(":"), self, activated=self.command_line.setFocus)
 
@@ -930,19 +936,19 @@ class TraderGUI(QMainWindow):
             f"QMainWindow {{ background: {BG}; }}"
             f"QWidget {{ background: {BG}; color: {FG}; }}"
             f"QLabel {{ color: {FG}; }}"
-            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN};"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
             f" padding: 5px 16px; border-radius: 4px; }}"
-            f"QPushButton:hover {{ border: 1px solid {GREEN_HI}; }}"
+            f"QPushButton:hover {{ border: 1px solid {ACCENT_HI}; }}"
             f"QStatusBar {{ color: {AMBER}; }}"
             f"QMenuBar {{ background: {PANEL}; color: {FG}; }}"
-            f"QMenuBar::item:selected {{ background: {GREEN}; color: {BG}; }}"
-            f"QMenu {{ background: {PANEL}; color: {FG}; border: 1px solid {GREEN}; }}"
-            f"QMenu::item:selected {{ background: {GREEN}; color: {BG}; }}"
+            f"QMenuBar::item:selected {{ background: {ACCENT}; color: {BG}; }}"
+            f"QMenu {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT}; }}"
+            f"QMenu::item:selected {{ background: {ACCENT}; color: {BG}; }}"
             f"QTableView {{ background: {BG}; alternate-background-color: {PANEL}; color: {FG};"
             f" gridline-color: {PANEL}; selection-background-color: {SELECTION};"
             f" selection-color: {FG}; border: 1px solid {PANEL}; outline: none; }}"
             f"QHeaderView::section {{ background: {PANEL}; color: {DIM}; padding: 4px 10px;"
-            f" border: none; border-bottom: 1px solid {GREEN}; }}"
+            f" border: none; border-bottom: 1px solid {ACCENT}; }}"
         )
 
     def _welcome_text(self) -> str:
@@ -1385,6 +1391,29 @@ class TraderGUI(QMainWindow):
         self.trader.world.config.fee_level = level
         self._log_line(f"Fees set to '{level}'.", GREEN_HI)
         self.statusBar().showMessage(f"Fees: {level}", 3000)
+
+    @guard(context="accent picker")
+    def action_pick_accent(self) -> None:
+        """Pick a theme accent, save it, and prompt for a restart (P&L colours stay green/red)."""
+        chosen = QColorDialog.getColor(QColor(ACCENT), self, "Choose accent colour")
+        if not chosen.isValid():                     # dialog cancelled
+            return
+        hex_color = chosen.name()                    # "#rrggbb", lower-case
+        set_accent_color(hex_color)
+        self._log_line(f"Accent colour set to {hex_color} — restart to apply.", GREEN_HI)
+        QMessageBox.information(
+            self, "Accent colour",
+            f"Saved {hex_color} as your accent colour.\n\n"
+            "Restart Trader PRO to see it applied — profit stays green, loss stays red.")
+
+    @guard(context="accent reset")
+    def action_reset_accent(self) -> None:
+        """Forget any custom accent, reverting to the default phosphor green next launch."""
+        clear_accent_color()
+        self._log_line("Accent colour reset to phosphor green — restart to apply.", GREEN_HI)
+        QMessageBox.information(
+            self, "Accent colour",
+            "Reset to the default phosphor green.\n\nRestart Trader PRO to see it applied.")
 
     def show_help(self) -> None:
         HelpDialog(self).exec()

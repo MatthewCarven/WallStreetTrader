@@ -1396,3 +1396,52 @@ section. `test_persistence.py` +1 (from-source paths resolve to the repo root, s
 suite **127 pass** (was 126). PyInstaller isn't a runtime dep — only needed to build.
 
 Commit is local — not pushed.
+
+---
+
+## 2026-07-15 — GUI: user-themeable accent colour (colour picker + settings.json)
+
+Matthew asked for a colour picker that saves as a default "somewhere" so the theme's green can
+become blue/red/whatever. Agreed on an **accent-only** first pass: recolour the chrome, leave P&L
+semantics alone.
+
+**The key wrinkle, found by reading the code:** `GREEN` was doing *double duty* — it was both the
+theme accent (borders, menu highlights, command line, the TRADER PRO banner, row selection) **and**
+the profit colour (`GREEN if pnl > 0 else RED`, board % changes, chart fills, buy/cover buttons).
+Naively making "green" configurable would have turned profit blue when you picked blue. So the fix
+was to **split the two roles**, keeping the names honest:
+
+* `GREEN`/`GREEN_HI`/`RED` stay *fixed* P&L semantics — profit green, loss red, always.
+* New `ACCENT`/`ACCENT_HI` (+ derived `SELECTION`) carry the themeable chrome. All ~17 chrome sites
+  in `app.py` (borders/menus/hover/command-line) and the banner in `model.py` moved to `ACCENT`;
+  the ~18 semantic-green sites were deliberately left untouched. Log-line confirmations stay green
+  (success = green is conventional, and it needs no edits).
+
+**One picker, three shades.** `model.accent_palette(accent)` returns `(ACCENT, ACCENT_HI, SELECTION)`:
+`None` reproduces the exact hand-tuned phosphor-green literals (zero drift for existing users), and a
+custom accent derives a brighter highlight (x1.2) and a dimmed row-selection (x0.6 — which reproduces
+the original `#1c682f` from `#2fae4e` *exactly*, so the 0.6 factor is the very rule the old constant
+encoded). So you pick one colour and the harmonious shades follow.
+
+**Persistence.** New Qt-free `trader_pro/gui/settings.py` — a tiny `settings.json` living beside the
+saves via `user_data_dir()` (so a portable Trader PRO carries your theme next to the `.exe`, same
+philosophy as the save slots). Defensive like the rest of the codebase: missing/corrupt/non-object
+JSON yields `{}` and never raises; writes are atomic (temp + `os.replace`), same crash-safe trick as
+the save layer. `model.py` reads the accent once at import behind a try/except, so a broken settings
+file can never stop the app booting.
+
+**UI.** An **Appearance** menu (between Fees and Help) with "Accent colour…" (opens `QColorDialog`)
+and "Reset accent to green". Both handlers are `@guard`-wrapped. **Restart-to-apply** for this first
+pass — honest and simple; the dialog says so, and a log line confirms the save. Live-repaint is the
+obvious Phase 2 (would need palette access to route through a mutable object rather than import-time
+bound names) but was explicitly out of scope for "keep it simple."
+
+**Tests & verification.** New `tests/test_gui_settings.py` (+15): hex validation, load/save round-trip,
+corrupt/non-object fallback, accent get/set/clear, and the palette derivation (incl. the x0.6 =>
+`#1c682f` identity). All I/O aimed at `tmp_path`, never the live file. Beyond the unit tests I drove
+the real chain end-to-end: saved `#e5484d` via the actual API, imported `model` in a fresh subprocess,
+and confirmed `ACCENT=#e5484d` / `ACCENT_HI=#ff565c` / `SELECTION=#892b2e` while `GREEN` stayed
+`#2fae4e` — then cleaned the repo back to pristine (no settings.json, no temp turds). Full suite
+**142 pass** (was 127). README's GUI paragraph gained the Appearance menu.
+
+Commit is local — not pushed.
