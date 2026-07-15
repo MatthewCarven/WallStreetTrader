@@ -817,11 +817,13 @@ class TraderGUI(QMainWindow):
         # net-worth equity curve (from pf.nw_history) — small, fixed height at the top
         self.equity_chart = pg.PlotWidget(axisItems={"left": MoneyAxis(orientation="left")})
         self.equity_chart.setBackground(PANEL)
+        self.equity_chart.setStyleSheet(f"border: 1px solid {ACCENT}; border-radius: 4px;")
         self.equity_chart.showGrid(x=False, y=True, alpha=0.12)
         self.equity_chart.setMenuEnabled(False)
         self.equity_chart.hideButtons()
         self.equity_chart.setMouseEnabled(x=False, y=False)
         self.equity_chart.getPlotItem().hideAxis("bottom")
+        self.equity_chart.getAxis("left").setPen(SELECTION)     # dim-accent axis + gridlines
         self.equity_chart.getAxis("left").setTextPen(DIM)
         self.equity_chart.setMaximumHeight(130)
         self._equity_curve = self.equity_chart.plot([], [])
@@ -838,6 +840,7 @@ class TraderGUI(QMainWindow):
 
         self.chart = pg.PlotWidget(axisItems={"left": MoneyAxis(orientation="left")})
         self.chart.setBackground(PANEL)
+        self.chart.setStyleSheet(f"border: 1px solid {ACCENT}; border-radius: 4px;")
         self.chart.showGrid(x=False, y=True, alpha=0.15)
         self.chart.setMenuEnabled(False)
         self.chart.hideButtons()
@@ -845,6 +848,7 @@ class TraderGUI(QMainWindow):
         self.chart.setClipToView(True)                  # render only what's in view ...
         self.chart.getPlotItem().setDownsampling(auto=True, mode="peak")  # ... cheap even at ~1440 pts
         self.chart.getPlotItem().hideAxis("bottom")     # tick-minute x labels aren't meaningful
+        self.chart.getAxis("left").setPen(SELECTION)    # dim-accent axis + gridlines
         self.chart.getAxis("left").setTextPen(DIM)
         self._curve = self.chart.plot([], [])
         right_col.addWidget(self.chart, 1)

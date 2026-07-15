@@ -1445,3 +1445,12 @@ and confirmed `ACCENT=#e5484d` / `ACCENT_HI=#ff565c` / `SELECTION=#892b2e` while
 **142 pass** (was 127). README's GUI paragraph gained the Appearance menu.
 
 Commit is local — not pushed.
+
+**Follow-up — accent on the charts.** Matthew asked to extend the accent to the two pyqtgraph charts
+(price + equity curve). Same principle as the P&L split: the data line/fill/title is a *functional
+up-vs-down signal* (green rising / red falling), and theming it would collapse up and down to one
+colour for a red or amber accent — so the line stays green/red. Instead themed the chart **chrome**:
+each PlotWidget gets a `1px solid {ACCENT}` frame (matching the news panel) and its left axis +
+gridlines take the dim-accent `SELECTION` pen. Always hue-safe. Verified by rendering the styled
+widget offscreen (QT_QPA_PLATFORM=offscreen + widget.grab()) at green and blue accents: chrome
+follows the accent, the green up-line and red down-line stay readable against blue. Suite still 142.
