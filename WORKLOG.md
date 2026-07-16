@@ -1516,3 +1516,25 @@ trigger.py` (+4): each of the four kinds fires the right side, waits-until-cross
 cancellation removes without buying, and the `_advance` 3-tuple wiring. Full suite **152 pass** (was 148).
 
 Commit is local — not pushed.
+
+### Slice L3 — CLI commands (`limit` / `stop` / `orders` / `cancel`)
+
+Grammar: `limit <SYM> <buy|sell> <qty|$amt> <price>` (and `stop …`), with `@` as optional sugar
+(`limit AAPL buy 10 @ 120`). A `$amount` converts at the **trigger** price (the intended fill), and
+`all` is refused for resting orders — a resting size must be fixed up front since holdings can change
+before it fires (`_parse_resting_qty`). `orders`/`o` prints a table with a green `●` on any order whose
+trigger is already met (fills next advance); `cancel <id|all>` drops one or all (accepts `#3` or `3`).
+All four handlers reuse `resolve`, `place_pending`, `cancel_pending` and the existing colour/`col`
+idiom; registered in the dispatch map; `help` + README Commands block + feature line updated.
+
+**Cross-front-end for free:** the TUI and GUI command-lines both call `trader.execute(line)`, so these
+commands already work in all three front-ends as typed commands. L4/L5 add *discoverable* UI (a TUI
+orders panel, a GUI order-type selector + pending list) on top — the plumbing is done.
+
+Verified by driving the real CLI: placed limit/stop/`$amount` orders (trigger-price conversion
+16.39 = 1000/61.03 ✓), listed with the `●` armed marker, cancelled by id, and ran the full
+place→`next`→fill chain (`◆ limit filled — buy 4 A @ $122.14`, filling at market ≤ the $134.28 limit,
+book cleared). Bad inputs (missing args, bad side, unknown symbol, `all`, non-positive trigger) all
+return friendly usage strings and rest nothing. `test_cli_orders.py` (+6). Full suite **158 pass**.
+
+Commit is local — not pushed.

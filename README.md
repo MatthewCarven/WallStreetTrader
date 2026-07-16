@@ -16,8 +16,9 @@ the build history.
 ## Status
 
 **V1 — feature-complete local single-player.** Four asset classes, longs / shorts /
-2:1 margin with margin calls, 8 market "personalities", a seeded event system with
-black-swan cascades, loans, buyable price predictions, brokerage fees, save/load, and three
+2:1 margin with margin calls, resting **stop / limit orders**, 8 market "personalities", a
+seeded event system with black-swan cascades, loans, buyable price predictions, brokerage
+fees, save/load, and three
 front-ends: a plain CLI, a live retro **TUI**, and a **PySide6 desktop GUI** (the TUI and GUI are at
 feature parity). V2 web and V3 (multiplayer) are designed but not built — see the roadmap in
 `design.md` §9.
@@ -136,6 +137,10 @@ sell <SYM> <qty|all>       e.g. 'sell AAPL 5'  or  'sell BTR all'
 short <SYM> <qty|$amt>     open/extend a short (profit if it falls)
 cover <SYM> [qty|all]      buy back a short
                            (buying uses up to 2:1 margin; leverage can trigger margin calls)
+limit <SYM> <buy|sell> <qty|$amt> <price>   rest an order that fills at/through your price
+stop  <SYM> <buy|sell> <qty|$amt> <price>   stop / stop-loss: fires when price reaches it
+orders | o                 list resting orders (● = trigger already met)
+cancel <id|all>            drop a resting order
 port | p                   portfolio, net worth & P&L
 news                       recent market headlines
 predict <SYM> [1d|6h]      buy a forecast (accuracy depends on the world's profile)
@@ -189,7 +194,7 @@ trader_pro/                the Python package (engine, front-ends, save/load)
     engine.py              the layered tick engine (prices = f(seed, tick))
     profiles.py            the 8 market personalities + their coefficients
     portfolio.py           positions, cash, margin, loans, net-worth history
-    orders.py              buy/sell/short/cover, margin checks, fees, forced liquidation
+    orders.py              buy/sell/short/cover, resting stop/limit orders, margin checks, fees, forced liquidation
     events.py              seeded events, black swans & crash cascades
     predictions.py         buyable, seeded price forecasts
   cli.py                   the text front-end (TraderApp)

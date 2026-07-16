@@ -19,8 +19,8 @@ from pathlib import Path
 
 from .core import (
     load_seed_universe, World, MarketEngine, AssetKind, make_asset_id,
-    Order, OrderSide, execute_order, liquidate_for_margin, process_pending,
-    make_prediction, save_world, load_world,
+    Order, OrderSide, OrderKind, execute_order, liquidate_for_margin, process_pending,
+    place_pending, cancel_pending, make_prediction, save_world, load_world,
     PROFILE_NAMES, get_profile,
 )
 from .core.engine import DAY, HOUR
@@ -171,6 +171,10 @@ class TraderApp:
             "sell": self._sell, "s": self._sell,
             "short": self._short,
             "cover": self._cover,
+            "limit": self._limit,
+            "stop": self._stop,
+            "orders": self._orders, "o": self._orders,
+            "cancel": self._cancel,
             "port": self._port, "portfolio": self._port, "p": self._port,
             "news": self._news,
             "loan": self._loan,
@@ -211,6 +215,9 @@ class TraderApp:
             "  short <SYM> <qty|$amt>    open/extend a short (profit if it falls)\n"
             "  cover <SYM> [qty|all]     buy back a short\n"
             "  (buying uses up to 2:1 margin; shorts & leverage can trigger margin calls)\n"
+            "  limit <SYM> <buy|sell> <qty|$amt> <price>   rest an order that fills at your price\n"
+            "  stop  <SYM> <buy|sell> <qty|$amt> <price>   stop / stop-loss: fires when price hits it\n"
+            "  orders | o                list resting orders    cancel <id|all>   drop them\n"
             "  port | p                  your portfolio & P&L\n"
             "  news                      recent market headlines\n"
             "  predict <SYM> [1d|6h]     buy a forecast (accuracy depends on the world)\n"
@@ -299,6 +306,24 @@ class TraderApp:
         except ValueError:
             return None
 
+    @staticmethod
+    def _parse_resting_qty(token: str, trigger: float) -> float | None:
+        """Share quantity for a resting order. A `$amount` converts at the *trigger* price (the
+        intended fill), not the current one. `all` is refused — a resting order's size must be
+        fixed up front, since holdings can change before it triggers."""
+        token = token.lower()
+        if token == "all":
+            return None
+        if token.startswith("$"):
+            try:
+                return float(token[1:]) / trigger
+            except (ValueError, ZeroDivisionError):
+                return None
+        try:
+            return float(token)
+        except ValueError:
+            return None
+
     def _buy(self, args) -> str:
         if len(args) < 2:
             return "usage: buy <SYMBOL> <qty|$amount>"
@@ -331,6 +356,77 @@ class TraderApp:
                        f"(+{money(res.cash_delta)}) realized P&L {pnl}  "
                        f"cash {money(self.world.portfolio.cash)}", C.GREEN)
         return col(f"order rejected: {res.message}", C.RED)
+
+    # ---- resting stop/limit orders ---- #
+
+    def _limit(self, args) -> str:
+        return self._place_resting(OrderKind.LIMIT, args)
+
+    def _stop(self, args) -> str:
+        return self._place_resting(OrderKind.STOP, args)
+
+    def _place_resting(self, kind: OrderKind, args) -> str:
+        args = [a for a in args if a != "@"]        # allow 'limit AAPL buy 10 @ 120'
+        if len(args) < 4:
+            return f"usage: {kind.value} <SYM> <buy|sell> <qty|$amt> <price>"
+        aid = self.resolve(args[0])
+        if not aid:
+            return col(f"unknown symbol {args[0]!r}", C.YELLOW)
+        side = {"buy": OrderSide.BUY, "b": OrderSide.BUY,
+                "sell": OrderSide.SELL, "s": OrderSide.SELL}.get(args[1].lower())
+        if side is None:
+            return f"side must be buy or sell (got {args[1]!r})"
+        try:
+            trigger = float(args[3].lstrip("@"))
+        except ValueError:
+            return f"invalid trigger price {args[3]!r}"
+        if trigger <= 0:
+            return "trigger price must be positive"
+        qty = self._parse_resting_qty(args[2], trigger)
+        if qty is None or qty <= 0:
+            return ("invalid quantity — give a number of shares or a $amount "
+                    "('all' isn't allowed for resting orders)")
+        res = place_pending(self.world, aid, side, qty, kind, trigger)
+        if not res:
+            return col(f"couldn't place order: {res.message}", C.RED)
+        o = res.order
+        now = self.world.price(aid)
+        armed = col("  — in the money, fills next advance", C.YELLOW) if o.is_triggered(now) else ""
+        return col(f"resting order #{o.id}: {kind.value} {side.value} {fmt_qty(qty)} "
+                   f"{aid.split(':', 1)[1]} @ {money(trigger)} (now {money(now)})", C.CYAN) + armed
+
+    def _orders(self, args) -> str:
+        pf = self.world.portfolio
+        if not pf.pending:
+            return col("no resting orders (place one with 'limit' or 'stop')", C.DIM)
+        head = col(f"  {'ID':>3}  {'KIND':<5} {'SIDE':<4} {'QTY':>10}  {'TRIGGER':>13}  "
+                   f"{'NOW':>13}  SYMBOL", C.DIM)
+        lines = [head]
+        for o in pf.pending:
+            sym = o.asset_id.split(":", 1)[1]
+            now = self.world.price(o.asset_id) if self.world.has_asset(o.asset_id) else 0.0
+            armed = col(" ●", C.GREEN) if o.is_triggered(now) else ""
+            lines.append(f"  {o.id:>3}  {o.kind.value:<5} {o.side.value:<4} {fmt_qty(o.quantity):>10}  "
+                         f"{money(o.trigger_price):>13}  {money(now):>13}  {sym}{armed}")
+        lines.append(col("  (● = trigger already met — fills on the next advance;  cancel <id|all>)", C.DIM))
+        return "\n".join(lines)
+
+    def _cancel(self, args) -> str:
+        pf = self.world.portfolio
+        if not args:
+            return "usage: cancel <id|all>"
+        if args[0].lower() == "all":
+            n = len(pf.pending)
+            pf.pending.clear()
+            return col(f"cancelled {n} resting order{'s' if n != 1 else ''}", C.YELLOW) if n \
+                else col("no resting orders to cancel", C.DIM)
+        if not args[0].lstrip("#").isdigit():
+            return "usage: cancel <id|all>"
+        o = cancel_pending(self.world, int(args[0].lstrip("#")))
+        if o is None:
+            return col(f"no resting order #{args[0].lstrip('#')}", C.YELLOW)
+        return col(f"cancelled #{o.id}: {o.kind.value} {o.side.value} {fmt_qty(o.quantity)} "
+                   f"{o.asset_id.split(':', 1)[1]} @ {money(o.trigger_price)}", C.YELLOW)
 
     def _port(self, args) -> str:
         w = self.world; pf = w.portfolio; po = w.price_of
