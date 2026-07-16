@@ -28,8 +28,8 @@ from PySide6.QtWidgets import (
 
 from ..cli import TraderApp, fmt_clock, money, fmt_qty
 from ..core import (
-    PROFILE_NAMES, AssetKind, Order, OrderSide, World, execute_order, get_profile,
-    make_prediction, quote_cost,
+    PROFILE_NAMES, AssetKind, Order, OrderSide, OrderKind, World, execute_order, get_profile,
+    place_pending, cancel_pending, infer_order_kind, make_prediction, quote_cost,
 )
 from ..core.engine import DAY, HOUR
 from ..core.orders import FEE_LEVELS
@@ -266,6 +266,18 @@ class TradeDialog(QDialog):
         self.qty.returnPressed.connect(lambda: self._act("buy"))
         layout.addWidget(self.qty)
 
+        self.trigger = QLineEdit()
+        self.trigger.setPlaceholderText("trigger price to rest a stop/limit (optional):   110")
+        self.trigger.setFont(mono)
+        self.trigger.returnPressed.connect(lambda: self._act("buy"))
+        layout.addWidget(self.trigger)
+        hint = QLabel(f'<span style="color:{DIM}">blank trigger = market now · with a trigger, '
+                      f'Buy/Sell rest a stop/limit (type inferred from the price)</span>')
+        hint.setTextFormat(Qt.RichText)
+        hint.setFont(mono)
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
         buttons = QHBoxLayout()
         for verb, label, color in (("buy", "Buy", GREEN), ("sell", "Sell", RED),
                                    ("short", "Short", AMBER), ("cover", "Cover", GREEN_HI)):
@@ -306,6 +318,9 @@ class TradeDialog(QDialog):
 
     def _act(self, verb: str) -> None:
         w = self.trader.world
+        if self.trigger.text().strip():             # trigger set => rest a stop/limit, not trade now
+            self._rest(verb, w)
+            return
         qty = trade_quantity(w, self.aid, verb, self.qty.text())
         if qty <= 0:
             self._show("enter a valid quantity", AMBER)
@@ -318,8 +333,109 @@ class TradeDialog(QDialog):
         self.fill = (verb, qty, self.aid.split(":", 1)[1], res)
         self.accept()
 
+    @staticmethod
+    def _resting_qty(token: str, trigger: float):
+        """Share qty for a resting order; a $amount converts at the trigger price. 'all'/blank
+        are refused — a resting size must be fixed up front (holdings can change before it fires)."""
+        token = token.strip().lower().replace(",", "")
+        if not token or token == "all":
+            return None
+        try:
+            return float(token[1:]) / trigger if token.startswith("$") else float(token)
+        except (ValueError, ZeroDivisionError):
+            return None
+
+    def _rest(self, verb: str, w) -> None:
+        try:
+            trigger = float(self.trigger.text().strip().lstrip("@").replace(",", ""))
+        except ValueError:
+            self._show("enter a valid trigger price", AMBER)
+            return
+        if trigger <= 0:
+            self._show("trigger price must be positive", AMBER)
+            return
+        qty = self._resting_qty(self.qty.text(), trigger)
+        if qty is None or qty <= 0:
+            self._show("enter a share quantity or $amount (no 'all' for resting orders)", AMBER)
+            return
+        side = OrderSide.BUY if verb in ("buy", "cover") else OrderSide.SELL
+        kind = infer_order_kind(side, trigger, w.price(self.aid))
+        res = place_pending(w, self.aid, side, qty, kind, trigger)
+        if not res:
+            self._show(res.message, RED)
+            return
+        self.fill = ("resting", res.order)
+        self.accept()
+
     def _show(self, text: str, color: str) -> None:
         self.msg.setText(f'<span style="color:{color}">{text}</span>')
+
+
+class OrdersDialog(QDialog):
+    """The resting stop/limit order book — 'Cancel order' drops the selected one. New orders are
+    rested from the Trade dialog (add a trigger price there)."""
+
+    def __init__(self, trader: TraderApp, parent=None):
+        super().__init__(parent)
+        self.trader = trader
+        self.setWindowTitle("Resting orders")
+        self.setModal(True)
+        self.setMinimumSize(580, 320)
+        mono = QFont("Consolas")
+        mono.setStyleHint(QFont.Monospace)
+        mono.setPointSize(10)
+
+        layout = QVBoxLayout(self)
+        self.list = QListWidget()
+        self.list.setFont(mono)
+        self.list.itemDoubleClicked.connect(lambda _item: self._cancel())
+        layout.addWidget(self.list, 1)
+        buttons = QHBoxLayout()
+        cancel_b = QPushButton("Cancel order")
+        cancel_b.clicked.connect(self._cancel)
+        close_b = QPushButton("Close")
+        close_b.clicked.connect(self.accept)
+        buttons.addWidget(cancel_b)
+        buttons.addStretch(1)
+        buttons.addWidget(close_b)
+        layout.addLayout(buttons)
+        self.setStyleSheet(
+            f"QDialog {{ background: {BG}; }} QLabel {{ color: {FG}; }}"
+            f"QListWidget {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT}; }}"
+            f"QPushButton {{ background: {PANEL}; color: {FG}; border: 1px solid {ACCENT};"
+            f" padding: 5px 14px; border-radius: 4px; }}"
+        )
+        self._fill()
+
+    def _fill(self):
+        self.list.clear()
+        w = self.trader.world
+        pending = w.portfolio.pending
+        if not pending:
+            item = QListWidgetItem("(no resting orders — set one from the Trade dialog: add a trigger price)")
+            item.setForeground(QColor(DIM))
+            self.list.addItem(item)
+            return
+        for o in pending:
+            now = w.price(o.asset_id) if w.has_asset(o.asset_id) else 0.0
+            armed = "  ●" if o.is_triggered(now) else ""
+            line = (f"#{o.id:<3} {o.kind.value:<5} {o.side.value:<4} {fmt_qty(o.quantity):>11}  "
+                    f"@ {money(o.trigger_price):>13}   now {money(now):>13}   "
+                    f"{o.asset_id.split(':', 1)[1]}{armed}")
+            item = QListWidgetItem(line)
+            item.setData(Qt.UserRole, o.id)
+            if o.is_triggered(now):
+                item.setForeground(QColor(GREEN))
+            self.list.addItem(item)
+        self.list.setCurrentRow(0)
+
+    def _cancel(self):
+        item = self.list.currentItem()
+        oid = item.data(Qt.UserRole) if item else None
+        if oid is None:
+            return
+        cancel_pending(self.trader.world, int(oid))
+        self._fill()
 
 
 class LoadDialog(QDialog):
@@ -638,6 +754,9 @@ class TraderGUI(QMainWindow):
         act_load = game_menu.addAction("Saves / Load…")
         act_load.setShortcut("Ctrl+L")
         act_load.triggered.connect(self.action_load)
+        act_orders = game_menu.addAction("Resting orders…")
+        act_orders.setShortcut("Ctrl+O")
+        act_orders.triggered.connect(self.action_orders)
         game_menu.addSeparator()
         fees_menu = game_menu.addMenu("Fees")
         for level in FEE_LEVELS:
@@ -1256,10 +1375,14 @@ class TraderGUI(QMainWindow):
         po = self.trader.world.price_of
         upnl = pf.unrealized_pnl(po)
         upnl_c = GREEN if upnl > 0 else (RED if upnl < 0 else DIM)
+        n = len(pf.pending)
+        resting = (f'   <span style="color:{ACCENT}">⏳ {n} resting order'
+                   f'{"s" if n != 1 else ""} (Ctrl+O)</span>') if n else ""
         self.pos_summary.setText(
             f'Positions ({self.positions_model.rowCount()})   '
             f'unrealized <span style="color:{upnl_c}">{signed_money(upnl)}</span>   '
             f'<span style="color:{DIM}">margin headroom {money(pf.maintenance_excess(po))}</span>'
+            f'{resting}'
             f'<br><span style="color:{DIM}">run · peak {money(pf.peak_net_worth)} · '
             f'max drawdown {pf.max_drawdown * 100:.1f}% · '
             f'black swans survived {pf.swans_survived}</span>'
@@ -1280,7 +1403,29 @@ class TraderGUI(QMainWindow):
             self._play_clock = None                 # don't bank the paused time on resume
             self._timer.start()
         if accepted and dlg.fill:
-            self._on_filled(*dlg.fill)
+            if dlg.fill[0] == "resting":            # a stop/limit was rested, not traded now
+                self._on_rested(dlg.fill[1])
+            else:
+                self._on_filled(*dlg.fill)
+
+    @guard(context="orders")
+    def action_orders(self) -> None:
+        self._timer.stop()                          # freeze the market while the book is open
+        try:
+            OrdersDialog(self.trader, self).exec()
+        finally:
+            self._play_clock = None                 # don't bank the paused time on resume
+            self._timer.start()
+        self._refresh_positions()                   # a cancel may have emptied the book
+        self._refresh_board()
+
+    def _on_rested(self, order) -> None:
+        self._refresh_positions()
+        text = (f"rested #{order.id}: {order.kind.value} {order.side.value} "
+                f"{fmt_qty(order.quantity)} {order.asset_id.split(':', 1)[1]} "
+                f"@ {money(order.trigger_price)}")
+        self._log_line(text, AMBER)
+        self.statusBar().showMessage(text, 6000)
 
     def _on_filled(self, verb: str, qty: float, sym: str, res) -> None:
         self._rebuild_board()                       # holdings changed — re-pin owned rows

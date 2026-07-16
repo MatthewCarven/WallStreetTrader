@@ -1564,3 +1564,30 @@ the right one. `test_tui_orders.py` (+2: the `_infer_kind` truth table and the p
 suite **160 pass** (was 158). L5 (GUI) is the last stop/limit slice.
 
 Commit is local — not pushed.
+
+### Slice L5 — GUI surface (trade-dialog trigger + Ctrl+O dialog) — stop/limit COMPLETE
+
+The GUI mirror of L4, so all three front-ends now match:
+
+- **Shared inference rule.** Pulled the limit-vs-stop-from-price logic into `orders.infer_order_kind`
+  (buy below / sell above = LIMIT, buy above / sell below = STOP) so the GUI and TUI dialogs share one
+  domain rule (the TUI's `_infer_kind` is now a thin `staticmethod` wrapper; its truth-table test still
+  passes). A future web front-end reuses it too.
+- **TradeDialog (Qt)** gains an optional trigger QLineEdit + a dim hint. Blank → market (unchanged);
+  filled → rests a stop/limit via `place_pending`, inferring the kind. `$amount` in the qty field
+  converts at the trigger, `all` is refused (`_resting_qty`). The dialog sets `self.fill =
+  ("resting", order)`; `open_trade` branches to a new `_on_rested` that logs `rested #id …` (amber) to
+  the activity feed + status bar.
+- **OrdersDialog** — a QListWidget order book (id, kind, side, qty, trigger, now, ● armed), "Cancel
+  order" (or double-click) drops the selected via `cancel_pending`, "Close" dismisses. Opened from
+  **Game ▸ Resting orders… (Ctrl+O)**; the market timer is frozen while it's open (same as the trade
+  dialog). The positions summary shows an ambient `⏳ N resting orders (Ctrl+O)` in the accent colour.
+
+Verified offscreen in a subprocess (QT_QPA_PLATFORM=offscreen, the repo's GUI-test convention): drove a
+real `TraderGUI` through a LIMIT placement (buy below), a STOP placement (buy above), `$1000`→10 units
+at the trigger, the `all` rejection, a blank-trigger market-order regression, `_on_rested` logging, the
+ambient count, and OrdersDialog list+cancel. `test_gui_orders.py` (+1). Full suite **161 pass** (was 160).
+
+**Stop/limit orders is done** — engine + CLI + TUI + GUI, 161 tests. Next feature: options (O1–O5).
+
+Commit is local — not pushed.

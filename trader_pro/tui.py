@@ -26,7 +26,7 @@ from rich.text import Text
 from .cli import TraderApp, money, fmt_qty
 from .core import (
     AssetKind, Order, OrderSide, OrderKind, World, execute_order,
-    place_pending, cancel_pending, load_seed_universe,
+    place_pending, cancel_pending, infer_order_kind, load_seed_universe,
 )
 from .core.engine import DAY, HOUR, WEEK
 from .core.orders import fee_rate
@@ -252,14 +252,7 @@ class TradeDialog(ModalScreen):
         except ValueError:
             return None
 
-    @staticmethod
-    def _infer_kind(side: OrderSide, trigger: float, price: float) -> OrderKind:
-        """Limit vs stop follows from where the trigger sits: a buy below (or a sell above) the
-        current price is a LIMIT; a buy above (or a sell below) is a STOP. Every combination is
-        the sensible one, so the player only has to pick a side and a price."""
-        if side is OrderSide.BUY:
-            return OrderKind.STOP if trigger > price else OrderKind.LIMIT
-        return OrderKind.STOP if trigger < price else OrderKind.LIMIT
+    _infer_kind = staticmethod(infer_order_kind)   # limit vs stop from trigger-vs-price (core rule)
 
     def _resting_qty(self, token: str, trigger: float):
         """Share qty for a resting order; a $amount converts at the trigger price. 'all'/blank

@@ -16,6 +16,7 @@ from .portfolio import Portfolio, Position
 from .orders import (
     Order, OrderSide, OrderKind, ExecutionResult, PendingOrder, PlacementResult,
     execute_order, place_pending, cancel_pending, process_pending, liquidate_for_margin,
+    infer_order_kind,
 )
 from .world import (
     World,
@@ -67,6 +68,7 @@ __all__ = [
     "cancel_pending",
     "process_pending",
     "liquidate_for_margin",
+    "infer_order_kind",
     "World",
     "WorldConfig",
     "MarketState",

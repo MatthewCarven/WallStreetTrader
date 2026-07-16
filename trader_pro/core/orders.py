@@ -177,6 +177,16 @@ def execute_order(world: "World", order: Order) -> ExecutionResult:
                            realized_pnl=realized, fee=fee, message=verb)
 
 
+def infer_order_kind(side: OrderSide, trigger: float, price: float) -> OrderKind:
+    """Which resting kind a (side, trigger) pair means, read off the current price: a buy *below*
+    the price (or a sell *above* it) is a LIMIT; a buy *above* (or a sell *below*) is a STOP. Every
+    combination is the sensible one, so a UI can let the player set just a side + a price and infer
+    the rest. (An exact-touch trigger reads as LIMIT — harmless; it fills on the next check.)"""
+    if side is OrderSide.BUY:
+        return OrderKind.STOP if trigger > price else OrderKind.LIMIT
+    return OrderKind.STOP if trigger < price else OrderKind.LIMIT
+
+
 def place_pending(world: "World", asset_id: str, side: OrderSide, quantity: float,
                   kind: OrderKind, trigger_price: float) -> PlacementResult:
     """Rest a stop/limit order on the portfolio. It touches no cash or positions now — the
