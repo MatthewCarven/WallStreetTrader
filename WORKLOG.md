@@ -1538,3 +1538,29 @@ book cleared). Bad inputs (missing args, bad side, unknown symbol, `all`, non-po
 return friendly usage strings and rest nothing. `test_cli_orders.py` (+6). Full suite **158 pass**.
 
 Commit is local — not pushed.
+
+### Slice L4 — TUI surface (trade-dialog trigger + Ctrl+O orders panel)
+
+Two discoverable affordances, both reusing existing patterns:
+
+- **Placement folded into the TradeDialog.** Added an optional *trigger price* input. Blank → market
+  order (unchanged). Filled → the same Buy/Sell/Short/Cover button **rests** a stop/limit, and the
+  order *type is inferred from the trigger vs the current price* (`_infer_kind`): buy below / sell
+  above = LIMIT, buy above / sell below = STOP. Every combination is the sensible one, so the player
+  only picks a side + a price — no separate limit/stop toggle. `$amount` in the qty field converts at
+  the trigger price; `all` is refused for resting (`_resting_qty`). The dialog dismisses a tagged
+  `("resting", order)` tuple; `_on_trade_closed` branches on it and logs `rested #id …` in cyan.
+- **`OrdersScreen` (Ctrl+O)** — the resting-order book, modelled on LoadScreen: a DataTable (ID, kind,
+  side, qty, trigger, now, symbol, ● armed marker) with `x`/Enter to cancel the highlighted order and
+  Esc to close. Cancels apply live via `cancel_pending`; the app refreshes on close.
+- **Ambient discoverability:** the port panel shows `⏳ N resting order(s) · Ctrl+O` whenever any rest;
+  HELP_TEXT gained the trigger-field note, the Ctrl+O key, and the `limit`/`stop`/`orders` commands.
+
+The design intent is that a stop/limit is "the same trade, but later" — so it lives *in* the trade
+dialog rather than behind a separate mode. Verified through the Textual pilot (real runtime, not mocks):
+opened the dialog, set qty+trigger, pressed Buy → a BUY/LIMIT order appeared on the portfolio and the
+dialog closed; the port panel showed the resting-order line; Ctrl+O listed both orders and `x` cancelled
+the right one. `test_tui_orders.py` (+2: the `_infer_kind` truth table and the pilot scenario). Full
+suite **160 pass** (was 158). L5 (GUI) is the last stop/limit slice.
+
+Commit is local — not pushed.

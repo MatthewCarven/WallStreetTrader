@@ -24,7 +24,10 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, S
 from rich.text import Text
 
 from .cli import TraderApp, money, fmt_qty
-from .core import AssetKind, Order, OrderSide, World, execute_order, load_seed_universe
+from .core import (
+    AssetKind, Order, OrderSide, OrderKind, World, execute_order,
+    place_pending, cancel_pending, load_seed_universe,
+)
 from .core.engine import DAY, HOUR, WEEK
 from .core.orders import fee_rate
 from .persistence import (
@@ -136,7 +139,8 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
   ← →      previous / next page on the board
   Ctrl+1…9 show / hide a board column  (toggle)
            [dim]1 Symbol · 2 Price · 3 1D% · 4 7D% · 5 31D% · 6 Pos · 7 Value · 8 Cost · 9 P&L[/]
-  Enter   open a buy/sell dialog for the highlighted row
+  Enter   buy/sell dialog (add a trigger price to rest a stop/limit order)
+  Ctrl+O  resting orders — view & cancel your stop/limit orders
   +/=, -/_  buy/sell 1 unit · [b]Ctrl[/] + [b]+/=, -/_[/] buy/sell 1000
   [  ]     slower / faster   (1 min/s → 10 hr/s of sim-time per real second)
   s        step one minute      h  +1 hour      d  +1 day
@@ -159,6 +163,8 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
   [b]Trade[/]:
     buy <SYM> <qty|$amt>      sell <SYM> <qty|all>
     short <SYM> <qty|$amt>    cover <SYM> [qty|all]
+    limit/stop <SYM> <buy|sell> <qty|$amt> <price>   rest a stop/limit
+    orders            list resting orders    cancel <id|all>   drop them
     predict <SYM> [1d|6h]     buy a forecast
     loan <amount>             repay [amount|all]
   [b]World[/]:
@@ -187,14 +193,21 @@ class HelpScreen(ModalScreen):
 
 
 class TradeDialog(ModalScreen):
-    """A buy / sell / short / cover dialog for a single asset (opened with Enter)."""
+    """A buy / sell / short / cover dialog for a single asset (opened with Enter).
+
+    Leave the trigger field blank for an immediate market order (the classic behaviour). Fill it
+    in and the same Buy/Sell/Short/Cover button instead *rests* a stop/limit order — the type is
+    inferred from where the trigger sits relative to the current price (buy below = limit / buy
+    above = stop; sell above = limit / sell below = stop), which is always the sensible reading."""
 
     CSS = """
     TradeDialog { align: center middle; }
     #trade-box { width: 62; height: auto; border: round $primary; background: $panel; padding: 1 2; }
     #trade-buttons { height: auto; align: center middle; margin-top: 1; }
     #trade-buttons Button { margin: 0 1; min-width: 10; }
-    #qty { margin: 1 0; }
+    #qty { margin: 1 0 0 0; }
+    #trigger { margin: 1 0 0 0; }
+    #trade-hint { height: auto; color: $text-muted; }
     #trade-msg { height: auto; }
     """
     BINDINGS = [("escape", "cancel", "Cancel"),
@@ -209,6 +222,9 @@ class TradeDialog(ModalScreen):
         with Vertical(id="trade-box"):
             yield Static(id="trade-info")
             yield Input(placeholder="quantity:  10   ·   $500   ·   all", id="qty")
+            yield Input(placeholder="trigger price to rest a stop/limit (optional):  110", id="trigger")
+            yield Static("[dim]blank trigger = market now · with a trigger, Buy/Sell rest a "
+                         "stop/limit (type inferred from the price)[/]", id="trade-hint")
             with Horizontal(id="trade-buttons"):
                 yield Button("Buy", variant="success", id="buy")
                 yield Button("Sell", variant="error", id="sell")
@@ -236,12 +252,54 @@ class TradeDialog(ModalScreen):
         except ValueError:
             return None
 
+    @staticmethod
+    def _infer_kind(side: OrderSide, trigger: float, price: float) -> OrderKind:
+        """Limit vs stop follows from where the trigger sits: a buy below (or a sell above) the
+        current price is a LIMIT; a buy above (or a sell below) is a STOP. Every combination is
+        the sensible one, so the player only has to pick a side and a price."""
+        if side is OrderSide.BUY:
+            return OrderKind.STOP if trigger > price else OrderKind.LIMIT
+        return OrderKind.STOP if trigger < price else OrderKind.LIMIT
+
+    def _resting_qty(self, token: str, trigger: float):
+        """Share qty for a resting order; a $amount converts at the trigger price. 'all'/blank
+        are refused — a resting size must be fixed up front (holdings can change before it fires)."""
+        token = token.strip().lower().replace(",", "")
+        if not token or token == "all":
+            return None
+        try:
+            return float(token[1:]) / trigger if token.startswith("$") else float(token)
+        except (ValueError, ZeroDivisionError):
+            return None
+
+    def _rest(self, verb: str, w, price: float, trig_token: str) -> None:
+        """Place a resting stop/limit order instead of trading now (trigger field non-empty)."""
+        try:
+            trigger = float(trig_token.lstrip("@").replace(",", ""))
+        except ValueError:
+            self._msg("enter a valid trigger price", "yellow"); return
+        if trigger <= 0:
+            self._msg("trigger price must be positive", "yellow"); return
+        qty = self._resting_qty(self.query_one("#qty", Input).value, trigger)
+        if not qty or qty <= 0:
+            self._msg("enter a share quantity or $amount (no 'all' for resting orders)", "yellow"); return
+        side = OrderSide.BUY if verb in ("buy", "cover") else OrderSide.SELL
+        kind = self._infer_kind(side, trigger, price)
+        res = place_pending(w, self.aid, side, qty, kind, trigger)
+        if not res:
+            self._msg(res.message, "red"); return
+        self._closing = True
+        self.dismiss(("resting", res.order))
+
     def _act(self, verb: str) -> None:
         if self._closing:                 # ignore queued repeats after we've acted
             return
         w = self.app.trader.world
         pos = w.portfolio.positions.get(self.aid)
         price = w.price(self.aid)
+        if self.query_one("#trigger", Input).value.strip():   # trigger set => rest a stop/limit
+            self._rest(verb, w, price, self.query_one("#trigger", Input).value.strip())
+            return
         token = self.query_one("#qty", Input).value.strip()
         if not token:  # Empty quantity: default to max
             if verb == "buy":
@@ -292,6 +350,85 @@ class TradeDialog(ModalScreen):
         if self._closing:
             return
         self._closing = True
+        self.dismiss(None)
+
+
+class OrdersScreen(ModalScreen):
+    """Ctrl+O — the resting stop/limit order book. Enter or x cancels the highlighted order;
+    Esc closes. Rest new orders from the trade dialog (Enter on an asset, add a trigger price)."""
+
+    CSS = """
+    OrdersScreen { align: center middle; }
+    #orders-box { width: 90; height: auto; max-height: 90%; border: round $primary; background: $panel; padding: 1 2; }
+    #orders-tbl { height: auto; max-height: 20; }
+    #orders-msg { height: 1; }
+    """
+    BINDINGS = [("escape", "close", "Close"),
+                ("x", "cancel_order", "Cancel"),
+                Binding("ctrl+c", "app.force_quit", "Quit", priority=True)]
+
+    def __init__(self):
+        super().__init__()
+        self._cur = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="orders-box"):
+            yield Static("[b cyan]Resting orders[/]   [dim]↑↓ choose · x / Enter cancel · Esc close   "
+                         "(● = trigger met, fills next tick)[/]")
+            yield DataTable(id="orders-tbl", cursor_type="row", zebra_stripes=True)
+            yield Static(id="orders-msg")
+
+    def on_mount(self) -> None:
+        t = self.query_one("#orders-tbl", DataTable)
+        t.add_columns("ID", "Kind", "Side", "Qty", "Trigger", "Now", "Symbol", "")
+        self._fill()
+        t.focus()
+
+    def _fill(self) -> None:
+        t = self.query_one("#orders-tbl", DataTable)
+        t.clear()
+        w = self.app.trader.world
+        pending = w.portfolio.pending
+        if not pending:
+            t.add_row(Text("(no resting orders — set one from the trade dialog: Enter on an asset)",
+                           style="dim"), "", "", "", "", "", "", "", key="__none__")
+            return
+        for o in pending:
+            now = w.price(o.asset_id) if w.has_asset(o.asset_id) else 0.0
+            armed = Text("●", style="green") if o.is_triggered(now) else Text("")
+            tone = "green" if o.side is OrderSide.BUY else "red"
+            t.add_row(str(o.id), o.kind.value, Text(o.side.value, style=tone),
+                      Text(fmt_qty(o.quantity), justify="right"),
+                      Text(money(o.trigger_price), justify="right"),
+                      Text(money(now), justify="right"),
+                      o.asset_id.split(":", 1)[1], armed, key=str(o.id))
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        event.stop()
+        self._cur = getattr(event.row_key, "value", None)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        event.stop()
+        self._cancel(getattr(event.row_key, "value", None))
+
+    def action_cancel_order(self) -> None:
+        self._cancel(self._cur)
+
+    def _cancel(self, key) -> None:
+        if not key or key == "__none__":
+            return
+        try:
+            oid = int(key)
+        except (TypeError, ValueError):
+            return
+        o = cancel_pending(self.app.trader.world, oid)
+        if o is not None:
+            self.query_one("#orders-msg", Static).update(
+                Text(f"cancelled #{o.id}: {o.kind.value} {o.side.value} {fmt_qty(o.quantity)} "
+                     f"{o.asset_id.split(':', 1)[1]} @ {money(o.trigger_price)}", style="yellow"))
+            self._fill()
+
+    def action_close(self) -> None:
         self.dismiss(None)
 
 
@@ -594,6 +731,7 @@ class TraderTUI(App):
         Binding("ctrl+n", "new_world", "New world"),
         Binding("ctrl+s", "save_game", "Save"),
         Binding("ctrl+l", "load_game", "Load"),
+        Binding("ctrl+o", "orders", "Orders"),
     ]
 
     def __init__(self, trader: TraderApp):
@@ -996,6 +1134,9 @@ class TraderTUI(App):
         port.append(f"\nrealized P&L {money(pf.realized_pnl)}", style="dim")
         port.append(f"\nrun · peak {money(pf.peak_net_worth)}  dd {pf.max_drawdown * 100:.0f}%  "
                     f"swans {pf.swans_survived}", style="dim")
+        if pf.pending:
+            n = len(pf.pending)
+            port.append(f"\n⏳ {n} resting order{'s' if n != 1 else ''} · Ctrl+O", style="cyan")
         self.query_one("#port", Static).update(port)
 
         hist = pf.nw_history
@@ -1180,6 +1321,13 @@ class TraderTUI(App):
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
 
+    def action_orders(self) -> None:
+        self.push_screen(OrdersScreen(), self._on_orders_closed)
+
+    def _on_orders_closed(self, _result) -> None:
+        # cancellations were applied live inside the modal; just resync the board & port panel
+        self._refresh()
+
     def action_chart_range(self) -> None:
         self.chart_range = (self.chart_range + 1) % len(CHART_RANGES)
         self._render_chart()
@@ -1322,10 +1470,15 @@ class TraderTUI(App):
         (verb, qty, sym, ExecutionResult). Log + redraw here, on the main screen once the modal
         is gone, so the dialog never touches our widgets while it is still open."""
         if result is not None:
-            verb, qty, sym, res = result
-            fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
-            self._log(Text(f"{verb} {fmt_qty(qty)} {sym} @ {money(res.price)}{fee_txt} "
-                           f"(P&L {res.realized_pnl:+,.2f})", style="green"))
+            if result[0] == "resting":                  # a stop/limit was rested, not traded now
+                o = result[1]
+                self._log(Text(f"rested #{o.id}: {o.kind.value} {o.side.value} {fmt_qty(o.quantity)} "
+                               f"{o.asset_id.split(':', 1)[1]} @ {money(o.trigger_price)}", style="cyan"))
+            else:
+                verb, qty, sym, res = result
+                fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
+                self._log(Text(f"{verb} {fmt_qty(qty)} {sym} @ {money(res.price)}{fee_txt} "
+                               f"(P&L {res.realized_pnl:+,.2f})", style="green"))
         self._refresh(keep_row=result is not None)
 
     # ---- view switching ---- #
