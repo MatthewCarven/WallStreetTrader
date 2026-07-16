@@ -1454,3 +1454,36 @@ each PlotWidget gets a `1px solid {ACCENT}` frame (matching the news panel) and 
 gridlines take the dim-accent `SELECTION` pen. Always hue-safe. Verified by rendering the styled
 widget offscreen (QT_QPA_PLATFORM=offscreen + widget.grab()) at green and blue accents: chrome
 follows the accent, the green up-line and red down-line stay readable against blue. Suite still 142.
+
+---
+
+## 2026-07-16 — Stop/limit orders (new feature) — Slice L1: core model + storage
+
+Matthew asked for stop/limit orders next, then options, "in as many slices as you deem." Planned it as
+five slices (L1 core model → L2 triggering in the advance loop → L3 CLI → L4 TUI → L5 GUI), each
+committed and shippable, with options sketched to follow. The architecture makes this clean: `TraderApp`
+(cli.py) is the shared session — the TUI and GUI both wrap it as `self.trader` and *all three* advance
+time through `TraderApp._advance()`, so the trigger check will live in exactly one place.
+
+**L1 — pure-additive core, no behaviour change yet.**
+- `orders.py`: `OrderKind` (LIMIT/STOP); `PendingOrder` (id, asset, side, qty, kind, trigger_price,
+  created_tick) with `is_triggered(price)` encoding the four-way truth table — SELL-limit & BUY-stop
+  fire on a *rise* (≥), BUY-limit & SELL-stop on a *fall* (≤), touch counts as crossed; `PlacementResult`
+  (truthy like ExecutionResult); `place_pending()` (validates qty>0, price>0, known asset; rests on the
+  portfolio, no funds/margin touched until it triggers) and `cancel_pending()` (pop by id).
+- `portfolio.py`: `Portfolio` gains `pending: list` + `next_order_id` (monotonic, serialized so ids stay
+  unique across saves). `to_dict`/`from_dict` wired; `from_dict` uses a **local** `import PendingOrder`
+  to avoid the orders↔portfolio import cycle. Back-compat: a blob without `pending`/`next_order_id`
+  loads as empty list / id 1 (same defaulting pattern as the run-stats fields).
+- Exported the new names from `core/__init__.py`.
+
+**Design decisions.** Resting orders live on the *portfolio* (they're player intent and must save/load
+with the account, like positions). Placement reserves nothing — the funds/margin check is deferred to
+trigger time and reuses `execute_order`'s existing initial-margin gate, so a resting order that can't be
+afforded when it fires just fails there (reported in L2) rather than needing a second margin model.
+
+`tests/test_orders.py` (+6): id assignment/counter, validation rejects (no id burn), the trigger truth
+table incl. exact-touch, cancel + unknown-id no-op, serialization round-trip, back-compat load. Full
+suite **148 pass** (was 142). No `_advance` change yet — triggering is L2.
+
+Commit is local — not pushed.

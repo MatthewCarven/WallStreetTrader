@@ -41,6 +41,17 @@ class OrderSide(str, Enum):
     SELL = "sell"
 
 
+class OrderKind(str, Enum):
+    """A resting order's trigger style (design.md §8.1 trade panel).
+
+    LIMIT fills at a price *better than or equal to* its trigger (buy at/below, sell at/above);
+    STOP fires once price *reaches* the trigger in the adverse direction (a buy-stop as price
+    rises, a stop-loss sell as it falls). The full truth table is in `PendingOrder.is_triggered`.
+    """
+    LIMIT = "limit"
+    STOP = "stop"
+
+
 @dataclass(slots=True)
 class Order:
     asset_id: str
@@ -67,6 +78,58 @@ class ExecutionResult:
 
     def __bool__(self) -> bool:
         return self.filled
+
+
+@dataclass(slots=True)
+class PendingOrder:
+    """A resting stop/limit order that fills automatically when price crosses its trigger.
+
+    Stored on the Portfolio (so it saves/loads with the player) and checked every advance by
+    `process_pending`. `quantity` is always positive; `side` decides whether the eventual fill
+    buys or sells — so a stop-loss on a long is a SELL stop, and a stop to cover a short is a
+    BUY stop."""
+    id: int
+    asset_id: str
+    side: OrderSide
+    quantity: float
+    kind: OrderKind
+    trigger_price: float
+    created_tick: int = 0
+
+    def is_triggered(self, price: float) -> bool:
+        """Has `price` crossed the trigger in the fill direction?
+
+        Two of the four (kind, side) combos fire on a *rise* to the trigger, two on a *fall*:
+          • rise (price ≥ trigger): SELL limit (take profit), BUY stop (breakout / cover-stop)
+          • fall (price ≤ trigger): BUY limit (buy the dip), SELL stop (stop-loss)
+        A price sitting exactly on the trigger counts as crossed."""
+        rise = (self.kind is OrderKind.LIMIT and self.side is OrderSide.SELL) or \
+               (self.kind is OrderKind.STOP and self.side is OrderSide.BUY)
+        return price >= self.trigger_price if rise else price <= self.trigger_price
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "asset_id": self.asset_id, "side": self.side.value,
+                "quantity": self.quantity, "kind": self.kind.value,
+                "trigger_price": self.trigger_price, "created_tick": self.created_tick}
+
+    @staticmethod
+    def from_dict(d: dict[str, Any]) -> "PendingOrder":
+        return PendingOrder(
+            id=d["id"], asset_id=d["asset_id"], side=OrderSide(d["side"]),
+            quantity=d["quantity"], kind=OrderKind(d["kind"]),
+            trigger_price=d["trigger_price"], created_tick=d.get("created_tick", 0),
+        )
+
+
+@dataclass(slots=True)
+class PlacementResult:
+    """Outcome of trying to rest a stop/limit order (parallels ExecutionResult's truthiness)."""
+    ok: bool
+    order: "PendingOrder | None" = None
+    message: str = ""
+
+    def __bool__(self) -> bool:
+        return self.ok
 
 
 def execute_order(world: "World", order: Order) -> ExecutionResult:
@@ -112,6 +175,35 @@ def execute_order(world: "World", order: Order) -> ExecutionResult:
         verb = "covered"
     return ExecutionResult(True, order, price=price, cash_delta=cash_delta,
                            realized_pnl=realized, fee=fee, message=verb)
+
+
+def place_pending(world: "World", asset_id: str, side: OrderSide, quantity: float,
+                  kind: OrderKind, trigger_price: float) -> PlacementResult:
+    """Rest a stop/limit order on the portfolio. It touches no cash or positions now — the
+    funds/margin check happens only at trigger time, when it goes through `execute_order`.
+    Nothing stops you resting an already-in-the-money trigger; it simply fills next advance."""
+    if quantity <= 0:
+        return PlacementResult(False, message="quantity must be positive")
+    if trigger_price <= 0:
+        return PlacementResult(False, message="trigger price must be positive")
+    if not world.has_asset(asset_id):
+        return PlacementResult(False, message=f"unknown asset {asset_id!r}")
+    pf = world.portfolio
+    order = PendingOrder(id=pf.next_order_id, asset_id=asset_id, side=side, quantity=quantity,
+                         kind=kind, trigger_price=trigger_price,
+                         created_tick=world.market.tick_index)
+    pf.next_order_id += 1
+    pf.pending.append(order)
+    return PlacementResult(True, order=order, message="resting")
+
+
+def cancel_pending(world: "World", order_id: int) -> "PendingOrder | None":
+    """Remove and return the resting order with `order_id`, or None if there's no such id."""
+    pf = world.portfolio
+    for i, o in enumerate(pf.pending):
+        if o.id == order_id:
+            return pf.pending.pop(i)
+    return None
 
 
 def liquidate_for_margin(world: "World") -> list[ExecutionResult]:

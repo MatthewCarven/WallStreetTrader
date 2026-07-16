@@ -13,7 +13,10 @@ from .models import (
     load_seed_universe,
 )
 from .portfolio import Portfolio, Position
-from .orders import Order, OrderSide, ExecutionResult, execute_order, liquidate_for_margin
+from .orders import (
+    Order, OrderSide, OrderKind, ExecutionResult, PendingOrder, PlacementResult,
+    execute_order, place_pending, cancel_pending, liquidate_for_margin,
+)
 from .world import (
     World,
     WorldConfig,
@@ -55,8 +58,13 @@ __all__ = [
     "Position",
     "Order",
     "OrderSide",
+    "OrderKind",
     "ExecutionResult",
+    "PendingOrder",
+    "PlacementResult",
     "execute_order",
+    "place_pending",
+    "cancel_pending",
     "liquidate_for_margin",
     "World",
     "WorldConfig",

@@ -87,6 +87,9 @@ class Portfolio:
     peak_net_worth: float = 0.0
     max_drawdown: float = 0.0        # worst peak-to-trough drop so far, as a fraction (0..1)
     swans_survived: int = 0          # black swans weathered while holding this account
+    # resting stop/limit orders (design.md §8.1) — checked each advance by orders.process_pending
+    pending: list = field(default_factory=list)
+    next_order_id: int = 1           # monotonic id source; serialized so ids stay unique across saves
 
     # ------------------------------------------------------------------ #
     # Fills — the one mutation path (cash is handled by the order executor)
@@ -246,10 +249,13 @@ class Portfolio:
             "peak_net_worth": self.peak_net_worth,
             "max_drawdown": self.max_drawdown,
             "swans_survived": self.swans_survived,
+            "pending": [o.to_dict() for o in self.pending],
+            "next_order_id": self.next_order_id,
         }
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> "Portfolio":
+        from .orders import PendingOrder   # local import: breaks the orders<->portfolio cycle
         return Portfolio(
             cash=d["cash"],
             realized_pnl=d.get("realized_pnl", 0.0),
@@ -259,4 +265,6 @@ class Portfolio:
             peak_net_worth=d.get("peak_net_worth", 0.0),
             max_drawdown=d.get("max_drawdown", 0.0),
             swans_survived=d.get("swans_survived", 0),
+            pending=[PendingOrder.from_dict(od) for od in d.get("pending", [])],
+            next_order_id=d.get("next_order_id", 1),
         )
