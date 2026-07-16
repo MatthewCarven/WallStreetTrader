@@ -206,6 +206,35 @@ def cancel_pending(world: "World", order_id: int) -> "PendingOrder | None":
     return None
 
 
+def process_pending(world: "World") -> list[ExecutionResult]:
+    """Fire any resting orders whose trigger the current price has crossed, in id order.
+
+    A fired order leaves the book whether or not it fills: on success it executes at the
+    *current market price* (for a limit, that's at least as good as the trigger); if it can't
+    clear the initial-margin check at fire time it is cancelled, carrying the reason. Returns one
+    ExecutionResult per fired order — inspect `.filled` to tell a fill from a cancellation.
+
+    Called once per `TraderApp._advance`, so triggers are evaluated on the price at the *end* of
+    each advance. In live play (advances of a few ticks) that is effectively every sim-minute; a
+    large explicit fast-forward (e.g. +1d) can step over a level only touched intraday — the same
+    end-point fidelity the seeded engine uses everywhere else (design.md §5.2)."""
+    pf = world.portfolio
+    if not pf.pending:
+        return []
+    results: list[ExecutionResult] = []
+    still_resting: list[PendingOrder] = []
+    for o in pf.pending:
+        if not world.has_asset(o.asset_id) or not o.is_triggered(world.price(o.asset_id)):
+            still_resting.append(o)
+            continue
+        res = execute_order(world, Order(o.asset_id, o.side, o.quantity))
+        res.message = (f"{o.kind.value} filled" if res.filled
+                       else f"{o.kind.value} cancelled: {res.message}")
+        results.append(res)
+    pf.pending = still_resting
+    return results
+
+
 def liquidate_for_margin(world: "World") -> list[ExecutionResult]:
     """Force-close positions (largest exposure first) until the account clears its
     maintenance requirement or runs out of positions. Returns the forced closures.

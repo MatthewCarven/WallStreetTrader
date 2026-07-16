@@ -470,6 +470,17 @@ def fill_entry(verb: str, qty: float, sym: str, res) -> tuple:
     return (f"{verb.upper()} {fmt_qty(qty)} {sym} @ {money(res.price)}{extra}", color)
 
 
+def pending_fill_entry(res) -> tuple:
+    """(text, colour) for a resting stop/limit order that fired — a fill (green) or, when it can't
+    clear margin at trigger time, a cancellation (amber). `res.message` already reads
+    'limit filled' / 'stop cancelled: …' from orders.process_pending."""
+    sym = res.order.asset_id.split(":", 1)[1]
+    if res.filled:
+        return (f"◆ {res.message} — {res.order.side.value} {fmt_qty(res.order.quantity)} "
+                f"{sym} @ {money(res.price)}", GREEN)
+    return (f"◇ {res.message} ({sym})", AMBER)
+
+
 def save_info_line(info) -> str:
     """One-line summary of a save slot (persistence.SaveInfo) for the load browser."""
     tag = "  (autosave)" if info.is_autosave else ""

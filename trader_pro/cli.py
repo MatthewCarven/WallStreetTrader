@@ -19,7 +19,8 @@ from pathlib import Path
 
 from .core import (
     load_seed_universe, World, MarketEngine, AssetKind, make_asset_id,
-    Order, OrderSide, execute_order, liquidate_for_margin, make_prediction, save_world, load_world,
+    Order, OrderSide, execute_order, liquidate_for_margin, process_pending,
+    make_prediction, save_world, load_world,
     PROFILE_NAMES, get_profile,
 )
 from .core.engine import DAY, HOUR
@@ -374,11 +375,14 @@ class TraderApp:
         t1 = self.world.market.tick_index
         self.world.portfolio.accrue_interest(t1 - t0)
         self.world.accrue_coupons(t1 - t0)
+        # Resting stop/limit orders fire on the new prices *before* any forced liquidation, so a
+        # player's own stop-loss gets its chance to de-risk ahead of a margin call.
+        fills = process_pending(self.world)
         self.world.portfolio.record_net_worth(t1, self.world.price_of)
         events = self.engine.events.fired_between(t0, t1)
         self.world.portfolio.swans_survived += sum(1 for e in events if e.kind == "flash_crash")
         closures = liquidate_for_margin(self.world)
-        return events, closures
+        return events, closures, fills
 
     def _liquidation_notice(self, closures) -> str:
         if not closures:
@@ -390,14 +394,28 @@ class TraderApp:
                              f"(P&L {r.realized_pnl:+,.2f})", C.RED))
         return "\n" + "\n".join(lines)
 
+    def _fills_notice(self, fills) -> str:
+        """Announce resting stop/limit orders that fired this advance (fills and cancellations)."""
+        if not fills:
+            return ""
+        lines = []
+        for r in fills:
+            sym = r.order.asset_id.split(":", 1)[1]
+            if r.filled:
+                lines.append(col(f"  ◆ {r.message} — {r.order.side.value} {fmt_qty(r.order.quantity)} "
+                                 f"{sym} @ {money(r.price)}", C.GREEN))
+            else:
+                lines.append(col(f"  ◇ {r.message} ({sym})", C.YELLOW))
+        return "\n" + "\n".join(lines)
+
     def _next(self, args) -> str:
         ticks = int(args[0]) if args and args[0].lstrip("-").isdigit() else HOUR
         if ticks <= 0:
             return "advance by a positive number of minutes"
-        events, closures = self._advance(ticks)
+        events, closures, fills = self._advance(ticks)
         out = col(f"⏩ advanced {ticks} min → {fmt_clock(self.world.market.tick_index)}", C.DIM)
-        return out + self._events_notice(events) + self._liquidation_notice(closures) \
-            + "\n" + self.header()
+        return out + self._fills_notice(fills) + self._events_notice(events) \
+            + self._liquidation_notice(closures) + "\n" + self.header()
 
     def _run(self, args) -> str:
         ticks = int(args[0]) if args and args[0].isdigit() else HOUR
@@ -408,12 +426,14 @@ class TraderApp:
         live = _color_enabled()
         notices = []
         ev_notices = []
+        fill_notices = []
         ran = 0
         try:
             for _ in range(ticks):
-                evs, clo = self._advance(1)
+                evs, clo, fil = self._advance(1)
                 ev_notices += evs
                 notices += clo
+                fill_notices += fil
                 ran += 1
                 if live:
                     sys.stdout.write("\r" + self.header().splitlines()[1] + "   ")
@@ -424,11 +444,13 @@ class TraderApp:
                 sys.stdout.write("\n")
             return col(f"⏹ stopped after {ran}/{ticks} min → "
                        f"{fmt_clock(self.world.market.tick_index)}", C.YELLOW) \
-                + self._events_notice(ev_notices[:6]) + self._liquidation_notice(notices)
+                + self._fills_notice(fill_notices) + self._events_notice(ev_notices[:6]) \
+                + self._liquidation_notice(notices)
         if live:
             sys.stdout.write("\n")
         return col(f"⏩ ran {ticks} min → {fmt_clock(self.world.market.tick_index)}", C.DIM) \
-            + self._events_notice(ev_notices[:6]) + self._liquidation_notice(notices)
+            + self._fills_notice(fill_notices) + self._events_notice(ev_notices[:6]) \
+            + self._liquidation_notice(notices)
 
     @staticmethod
     def _parse_horizon(tok: str) -> int:

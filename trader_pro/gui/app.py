@@ -42,7 +42,7 @@ from .model import (
     ACCENT, ACCENT_HI, AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
     PANEL, POSITION_COLUMNS, RED, SELECTION, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
     closure_entry, default_watchlist, event_entry, fill_entry, header_html, kind_ids,
-    margin_call_message,
+    margin_call_message, pending_fill_entry,
     margin_color, margin_fill, movers_ids, position_rows, prediction_summary, row_ctx,
     save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
 )
@@ -1009,13 +1009,13 @@ class TraderGUI(QMainWindow):
         """A discrete manual advance (Step / +1h / +1d) — jumps the market immediately, whether
         playing or paused, and never banks against the play clock. Mirrors the TUI's
         action_step/hour/day. Cheap even for +1d: the engine evaluates seeded anchors directly."""
-        events, closures = self.trader._advance(ticks)
+        events, closures, fills = self.trader._advance(ticks)
         self._refresh_header()
         self._refresh_board()
         self._refresh_chart()
         self._refresh_equity()
         self._refresh_positions()
-        self._log_news(events, closures)
+        self._log_news(events, closures, fills)
         if closures:
             self._notify_margin_call(closures)
 
@@ -1035,13 +1035,13 @@ class TraderGUI(QMainWindow):
         steps, self._tick_accum = steps_for(elapsed, SPEEDS[self.speed_idx][1], self._tick_accum)
         if steps <= 0:                          # not a whole sim-minute yet; wait for more time
             return
-        events, closures = self.trader._advance(steps)
+        events, closures, fills = self.trader._advance(steps)
         self._refresh_header()
         self._refresh_board()
         self._refresh_chart()
         self._refresh_equity()
         self._refresh_positions()
-        self._log_news(events, closures)
+        self._log_news(events, closures, fills)
         if self.autosave_enabled and now - self._last_autosave >= AUTOSAVE_SECS:
             self._autosave()
             self._last_autosave = now
@@ -1067,9 +1067,11 @@ class TraderGUI(QMainWindow):
         self._ticker_off = (self._ticker_off + 1) % len(base)
         self.ticker.setText(base[self._ticker_off:] + base[:self._ticker_off])
 
-    def _log_news(self, events, closures) -> None:
+    def _log_news(self, events, closures, fills=()) -> None:
         for ev in events:
             self._log_line(*event_entry(ev))
+        for r in fills:                             # resting stop/limit orders that fired
+            self._log_line(*pending_fill_entry(r))
         for c in closures:                          # inserted last => shown on top (most recent)
             self._log_line(*closure_entry(c))
 

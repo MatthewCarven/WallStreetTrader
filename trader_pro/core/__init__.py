@@ -15,7 +15,7 @@ from .models import (
 from .portfolio import Portfolio, Position
 from .orders import (
     Order, OrderSide, OrderKind, ExecutionResult, PendingOrder, PlacementResult,
-    execute_order, place_pending, cancel_pending, liquidate_for_margin,
+    execute_order, place_pending, cancel_pending, process_pending, liquidate_for_margin,
 )
 from .world import (
     World,
@@ -65,6 +65,7 @@ __all__ = [
     "execute_order",
     "place_pending",
     "cancel_pending",
+    "process_pending",
     "liquidate_for_margin",
     "World",
     "WorldConfig",

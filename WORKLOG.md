@@ -1487,3 +1487,32 @@ table incl. exact-touch, cancel + unknown-id no-op, serialization round-trip, ba
 suite **148 pass** (was 142). No `_advance` change yet — triggering is L2.
 
 Commit is local — not pushed.
+
+### Slice L2 — triggering in the advance loop
+
+- `orders.process_pending(world)`: fires any resting order whose trigger the *current* price has
+  crossed, in id order. A fired order leaves the book whether it fills or not — on success it goes
+  through the existing `execute_order` (so it fills at current market and re-uses the initial-margin
+  gate); if it can't clear margin at fire time it's **cancelled** with the reason (not left to retry
+  forever). Returns one ExecutionResult per fired order (`.filled` distinguishes fill vs cancel).
+- Wired into `TraderApp._advance`, right after prices update and **before** `liquidate_for_margin`, so
+  a player's own stop-loss gets to de-risk ahead of a forced margin call. `_advance` now returns
+  `(events, closures, fills)` — updated all **8** unpack sites (CLI `_next`/`_run`, TUI
+  step/hour/day + play-tick, GUI `_advance_now`/`_on_timer`). Test call sites that don't unpack were
+  unaffected.
+- **Fidelity note (documented in code):** triggers are evaluated on the price at the *end* of each
+  advance. In live play (a few ticks/advance) that's effectively every sim-minute; a big explicit
+  fast-forward (+1d) can step over a level only touched intraday — the same end-point fidelity the
+  seeded engine uses everywhere (design.md §5.2), and the reason best/worst-day was dropped in Tier 4.
+- **Notifications brought forward:** rather than let triggered fills be invisible until the L4/L5 UI
+  work, I added the fill/cancel line to all three feeds now — CLI `_fills_notice`, TUI `_log_fills`,
+  GUI `pending_fill_entry` + `_log_news(..., fills)`. L4/L5 stay scoped to *placement* UI and the
+  orders panel. Fills show green (◆), trigger-time cancellations amber (◇).
+
+Verified the CLI display end-to-end (not just via tests): rested an in-the-money buy-limit and an
+unaffordable buy-stop, ran `next 1` → `◆ limit filled — buy 3 A @ $122.14` and
+`◇ stop cancelled: insufficient buying power …`, both left the book, the long opened. `test_pending_
+trigger.py` (+4): each of the four kinds fires the right side, waits-until-crossed, trigger-time
+cancellation removes without buying, and the `_advance` 3-tuple wiring. Full suite **152 pass** (was 148).
+
+Commit is local — not pushed.

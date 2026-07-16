@@ -694,7 +694,8 @@ class TraderTUI(App):
         if steps <= 0:                       # not a whole sim-minute yet; wait for more real time
             return
         self._tick_accum -= steps
-        events, closures = self.trader._advance(steps)
+        events, closures, fills = self.trader._advance(steps)
+        self._log_fills(fills)
         self._log_events(events)
         self._log_closures(closures)
         self._refresh()
@@ -714,6 +715,16 @@ class TraderTUI(App):
             sym = c.order.asset_id.split(":", 1)[1]
             self._log(Text(f"⚠ MARGIN CALL — closed {fmt_qty(c.order.quantity)} {sym} "
                            f"@ {money(c.price)} (P&L {c.realized_pnl:+,.2f})", style="bold red"))
+
+    def _log_fills(self, fills) -> None:
+        """Announce resting stop/limit orders that fired (fills green, cancellations amber)."""
+        for r in fills:
+            sym = r.order.asset_id.split(":", 1)[1]
+            if r.filled:
+                self._log(Text(f"◆ {r.message} — {r.order.side.value} {fmt_qty(r.order.quantity)} "
+                               f"{sym} @ {money(r.price)}", style="green"))
+            else:
+                self._log(Text(f"◇ {r.message} ({sym})", style="yellow"))
 
     # ---- shared math ---- #
 
@@ -1096,15 +1107,16 @@ class TraderTUI(App):
         self._refresh()
 
     def action_step(self) -> None:
-        self.trader._advance(1); self._refresh()
+        _ev, _clo, fills = self.trader._advance(1)
+        self._log_fills(fills); self._refresh()
 
     def action_hour(self) -> None:
-        ev, clo = self.trader._advance(HOUR)
-        self._log_events(ev); self._log_closures(clo); self._refresh()
+        ev, clo, fills = self.trader._advance(HOUR)
+        self._log_fills(fills); self._log_events(ev); self._log_closures(clo); self._refresh()
 
     def action_day(self) -> None:
-        ev, clo = self.trader._advance(DAY)
-        self._log_events(ev); self._log_closures(clo); self._refresh()
+        ev, clo, fills = self.trader._advance(DAY)
+        self._log_fills(fills); self._log_events(ev); self._log_closures(clo); self._refresh()
 
     def _quick_trade(self, side: OrderSide, qty: float) -> None:
         """Execute a quick trade for a given quantity of the highlighted asset."""
