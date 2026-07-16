@@ -1216,7 +1216,7 @@ class TraderGUI(QMainWindow):
         color = GREEN if chg >= 0 else RED
         fill = QColor(color)
         fill.setAlpha(45)
-        self._curve.setData(xs, ys, pen=pg.mkPen(color, width=2), fillLevel=min(ys), fillBrush=fill)
+        self._curve.setData(xs, ys, pen=pg.mkPen(color, width=1), fillLevel=min(ys), fillBrush=fill)
         self.chart.setTitle(
             f"{aid.split(':', 1)[1]} · {label}    {money(cur)}   {chg:+.2f}%",
             color=color, size="10pt",
