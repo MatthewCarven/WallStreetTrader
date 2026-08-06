@@ -448,5 +448,57 @@ or post-V1 expansion.)*
 
 ---
 
-*Next step: V0.1 — stand up the project and the seed scrape — then a detailed engine
-spec for the layered tick model (V0.3), the part everything else depends on.*
+## 11. The V1.8 polish pass 🧽
+
+Agreed 2026-08-04. Fifteen slices in four waves, each shippable + tested on its own (the
+L1–L5 idiom from stop/limit orders). Options (§3.4, O1–O5) stays queued behind the pass.
+Sizes: **S** = an evening slice, **M** = a full session.
+
+**Wave A — session memory** *(foundations first: P5, P6, P12 and P14 all want settings keys)*
+
+- [ ] **P1 · Settings expansion + session restore** (M) — generic get/set in `gui/settings.py`;
+  persist & restore window geometry, board view + sort, chart range, speed. Fee level is
+  deliberately excluded — it lives in `world.config` and travels with the save, not the install.
+- [ ] **P2 · Live accent repaint** (M) — route the palette through a mutable theme object so the
+  picker applies instantly; retires "restart to apply". Unlocks P14.
+- [ ] **P3 · Autosave generations** (S) — rotate `autosave` → `.1` → `.2`; a corrupt newest
+  falls back down the chain at resume.
+
+**Wave B — feel** *(GUI-first; the TUI gets the terminal bell where it's a one-liner)*
+
+- [ ] **P4 · Price-flash on the board** (S) — cells pulse P&L-green/red on tick moves, then fade.
+  Respects the accent-vs-semantics split (§ the V1.7+ theming work).
+- [ ] **P5 · Sound** (M) — retro chirps: fill, cancel, margin-call klaxon, black-swan stinger.
+  Appearance ▸ Sound toggle persisted via P1. **Matthew: drop in PySynthRack for the synthesis.**
+- [ ] **P6 · Tray + toasts** (M) — minimise-to-tray option; Windows toasts for fills / margin
+  calls / black swans while hidden. The idle-friendly north star (§1), delivered.
+
+**Wave C — trader QoL** *(engine + all three front-ends, exactly like the L slices)*
+
+- [ ] **P7 · Blotter core** (M) — record every fill (manual, triggered, liquidation) on the
+  portfolio: tick, side, qty, price, fee, realized P&L. Serialized with saves, back-compat.
+- [ ] **P8 · Blotter UI** (M) — CLI `history`, a TUI screen, a GUI dialog + CSV export.
+- [ ] **P9 · Stats + market-close recap** (M) — lifetime fees / interest / realized P&L, biggest
+  win & loss, max drawdown; a recap line in all three feeds at each sim-day close.
+- [ ] **P10 · Price alerts** (S/M) — notify-only resting kind; `is_triggered` does the hard part.
+- [ ] **P11 · Trailing stops** (M) — TRAIL kind with a high-water-mark trigger, folded into the
+  existing trade dialogs.
+- [ ] **P12 · Editable watchlist** (S/M) — `watch` / `unwatch` commands + right-click add; saved
+  with the world.
+
+**Wave D — charts & branding**
+
+- [ ] **P13 · Chart candy** (M) — crosshair + hover readout, ▲/▼ markers at your fills,
+  cost-basis line, event diamonds where the black swan hit.
+- [ ] **P14 · Theme presets + CRT scanlines** (S/M) — Phosphor / Amber / Ice / Paper presets on
+  top of P2; the scanline overlay is the stretch goodie.
+- [ ] **P15 · Icon, About, exe diet** (M) — programmatically drawn candlestick icon, About dialog
+  with version, PyInstaller excludes to shrink the ~105 MB one-file exe.
+
+**Dependencies:** P1 → {P5, P6, P12, P14} · P2 → P14 · P7 → {P8, P9}. Everything else can jump
+the queue. If the pass drags, cut P11 and the scanlines first. **Parked:** achievements (becomes
+P16 on request) and candlestick charts (a feature, not polish — needs OHLC aggregation).
+
+---
+
+*Next step: work the pass roughly A → B → C → D, then options (O1–O5).*

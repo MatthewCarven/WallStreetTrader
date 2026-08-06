@@ -17,7 +17,7 @@ import sys
 import time
 
 import pyqtgraph as pg
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer
+from PySide6.QtCore import QAbstractTableModel, QByteArray, QModelIndex, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
@@ -37,7 +37,7 @@ from ..persistence import (
     AUTOSAVE_SLOT, SAVES_DIR, autosave_path, delete_save, list_saves, load_game, save_game,
     slot_path,
 )
-from .settings import clear_accent_color, set_accent_color
+from .settings import clear_accent_color, get_setting, set_accent_color, update_settings
 from .model import (
     ACCENT, ACCENT_HI, AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
     PANEL, POSITION_COLUMNS, RED, SELECTION, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
@@ -731,10 +731,17 @@ class TraderGUI(QMainWindow):
         self.margin_meter = None
         self.positions_model = None
 
+        # P1 session memory: speed + chart range are plain indices _build_ui bakes into its
+        # initial labels, so they restore *before* the widgets exist…
+        self._restore_prefs_pre()
+
         self.setWindowTitle("TRADER PRO")
-        self.resize(1120, 720)
+        self.resize(1120, 720)                  # default; a saved geometry overrides below
         self._build_ui()
         self._refresh_header()
+
+        # …while geometry / view / sort need the widgets, so they restore after.
+        self._restore_prefs_post()
 
         self._timer = QTimer(self)
         self._timer.setInterval(TIMER_MS)
@@ -1600,9 +1607,59 @@ class TraderGUI(QMainWindow):
         except Exception:
             pass                                # autosave is best-effort, exactly like the TUI
 
+    # ---- session memory (P1) ---- #
+    #
+    # Install-level trivia only (geometry / view / sort / chart range / speed) — game-state knobs
+    # like the fee level live on world.config and travel with the save instead. Restores treat the
+    # settings file as untrusted input (it's user-editable JSON): every value is validated and a
+    # bad one silently keeps the default, per the "never crash the UI over I/O" stance.
+
+    def _restore_prefs_pre(self) -> None:
+        """Speed + chart range — restored before _build_ui so the initial labels render right."""
+        idx = get_setting("speed")
+        if isinstance(idx, int) and 0 <= idx < len(SPEEDS):
+            self.speed_idx = idx
+        idx = get_setting("chart_range")
+        if isinstance(idx, int) and 0 <= idx < len(CHART_RANGES):
+            self.chart_range = idx
+
+    def _restore_prefs_post(self) -> None:
+        """Geometry + board view + sort — these need the widgets, so run right after _build_ui."""
+        geo = get_setting("geometry")
+        if isinstance(geo, str) and geo:
+            try:
+                self.restoreGeometry(QByteArray.fromHex(geo.encode("ascii")))
+            except Exception:
+                pass                            # junk geometry -> keep the 1120×720 default
+        if get_setting("sort_1d") is True:
+            self.sort_by_change = True
+            self.sort_btn.setChecked(True)
+        view = get_setting("view")
+        dispatch = {"owned": self.view_owned, "crypto": self.view_crypto,
+                    "stocks": self.view_stocks, "bonds": self.view_bonds,
+                    "watchlist": self.view_watch, "movers": self.view_movers}
+        if view in dispatch and view != self.view_label:
+            dispatch[view]()                    # checks the right button + rebuilds, sort applied
+        elif self.sort_by_change:
+            self._rebuild_board()               # default view, but the restored sort needs a pass
+
+    def _save_prefs(self) -> None:
+        """Persist the session trivia in one atomic write — best-effort, like autosave."""
+        try:
+            update_settings({
+                "geometry": bytes(self.saveGeometry().toHex()).decode("ascii"),
+                "view": self.view_label,
+                "sort_1d": self.sort_by_change,
+                "chart_range": self.chart_range,
+                "speed": self.speed_idx,
+            })
+        except Exception:
+            pass
+
     def closeEvent(self, event) -> None:        # noqa: N802 — Qt override name
         if self.autosave_enabled:
             self._autosave()
+        self._save_prefs()
         super().closeEvent(event)
 
 

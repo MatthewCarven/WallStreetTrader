@@ -1591,3 +1591,91 @@ ambient count, and OrdersDialog list+cancel. `test_gui_orders.py` (+1). Full sui
 **Stop/limit orders is done** — engine + CLI + TUI + GUI, 161 tests. Next feature: options (O1–O5).
 
 Commit is local — not pushed.
+
+---
+
+## 2026-08-04 — V1.8 "polish pass" agreed (design.md §11) + Slice P1: session memory
+
+Matthew asked how else to polish the game. Audited the code with polish glasses on (settings.json
+holds *only* the accent; window hardcodes 1120×720; zero audio; fixed watchlist; fills scroll away
+forever; no stats/history/watch/alert commands anywhere in the shared CLI) and pitched four
+directions — he took **all four**, and asked for it planned in slices. Result: a 15-slice backlog
+in 4 waves (A session memory · B feel · C trader QoL · D charts & branding), written into
+**design.md as §11** with checkboxes, sizes, dependencies (P1→{P5,P6,P12,P14}, P2→P14, P7→{P8,P9})
+and parked items (achievements, candlesticks). Options (O1–O5) stays queued behind the pass.
+**Note on P5 (sound): Matthew wants his PySynthRack dropped in for the synthesis.** The stale
+"*Next step: V0.1…*" footer got refreshed while I was in there.
+
+### Slice P1 — settings expansion + session restore (GUI)
+
+The GUI now remembers your session. `settings.json` gains `geometry`, `view`, `sort_1d`,
+`chart_range`, `speed` beside `accent`; all five restore at boot and persist in **one atomic
+write** from `closeEvent` (best-effort, exactly autosave's stance). The **fee level is
+deliberately excluded** — it lives on `world.config` and travels with the *save*, not the install;
+restoring it from settings would fight whatever game you load.
+
+- `gui/settings.py`: new `get_setting` / `update_settings` generics (a `None` value *removes* its
+  key — "unset" beats storing nulls), accent helpers refactored on top (their tests pass
+  untouched, which is the proof the generics behave). Paths now resolve **at call time** through
+  `settings_path()`, which honours a `TRADER_PRO_SETTINGS_DIR` env var. That hook exists because
+  the GUI now *reads* settings at construction — and the offscreen GUI tests run the real
+  `TraderGUI` in subprocesses that inherit our environment, so without it a developer's live
+  settings.json (say, `view: stocks`) would silently bend test assertions. New
+  `tests/conftest.py` autouse-fixture points the var at a per-test tmp dir for the whole suite.
+- `gui/app.py`: restore is split around `_build_ui` on purpose — speed + chart range are plain
+  indices the builder bakes into its initial labels, so `_restore_prefs_pre()` runs *before* it;
+  geometry / view / sort need the widgets, so `_restore_prefs_post()` runs after. Geometry rides
+  Qt's own `saveGeometry()/restoreGeometry()` blob (hex in the JSON) — maximised state and
+  multi-monitor sanity come free, and junk falls back to the 1120×720 default. The view restores
+  through the public `view_*` methods (button check + board rebuild for free), with sort applied
+  *first* so one rebuild covers both. Every read treats settings as untrusted user-editable JSON:
+  wrong type / out-of-range → silently keep the default, per the never-crash-the-UI stance.
+- Tests: `test_gui_settings.py` +4 (env override; get-with-default; merge + None-removes +
+  atomicity; accent-rides-the-generics). New `test_gui_session.py` +3 in the smoke-test subprocess
+  idiom: a pre-seeded settings file restores into the real widgets (speed/range labels, checked
+  view button, `board_model.sort_active`); a state-change + `gui.close()` drives the *real*
+  `closeEvent` persistence path and round-trips through the JSON (geometry verified as a genuine
+  hex blob); an all-junk file (`speed: 99`, `view: "bogus"`, non-hex geometry…) boots clean on
+  defaults and the app still advances.
+
+**Verification — and a change of venue for the test run.** Matthew moved the laptop mid-slice, so
+the work paused on disk-clean files and resumed after reconnect. Then a wrinkle: `device_bash` now
+runs in an isolated Linux VM with the folder mounted, and that VM has **no pytest, no PySide6, and
+no network** to install them — the old "run the suite in place on the mount" recipe is simply gone.
+So the suite now runs in the **cloud container** instead: stage the repo across, `pip install
+pytest textual<0.72 PySide6 pyqtgraph`, run offscreen. Python 3.11 / PySide6 6.11 / Textual 0.71
+there. As a bonus the stale-bytecode trap from earlier sessions doesn't apply (fresh copy, real
+mtimes), though `PYTHONDONTWRITEBYTECODE=1 -p no:cacheprovider` stayed on out of habit.
+
+**169 pass** (was 161; +8 = 4 settings + 4 session). Then I checked the new tests aren't vacuous by
+**mutating the feature three ways** and confirming each mutation is caught by exactly one test:
+delete the `_restore_prefs_post()` call → the restore test fails; drop `_save_prefs()` from
+`closeEvent` → the persistence test fails; remove the range/type validation on `speed` → the junk
+test fails. Also drove the two view paths the first restore test didn't cover (`movers`, which
+bypasses `_set_view`, and `owned`) against a real window — both restore correctly, and `movers`
+became a fourth test rather than a note.
+
+All eight files are committed to the repo; the README's stale "~50 tests across 12 files" is now
+"169 tests across 29 files" (in both places it appeared) and its coverage sentence now mentions
+resting orders, persistence, GUI session memory and the offscreen-subprocess Qt convention.
+
+**Commit is Matthew's to run, as ever:**
+
+```
+git add design.md README.md WORKLOG.md trader_pro/gui/settings.py trader_pro/gui/app.py \
+        tests/conftest.py tests/test_gui_settings.py tests/test_gui_session.py
+git commit -m "V1.8 polish backlog (design.md §11) + P1: GUI session memory
+
+Plan the polish pass as 15 slices in 4 waves, then ship the first:
+the GUI now remembers window geometry, board view, sort, chart range
+and speed in settings.json, restoring at boot and persisting on close.
+
+- settings.py: generic get_setting/update_settings (None removes a key);
+  call-time path resolution via settings_path() + TRADER_PRO_SETTINGS_DIR
+  so tests never touch a real settings.json; accent helpers ride the generics
+- app.py: restore split around _build_ui (indices before, widgets after);
+  Qt saveGeometry blob; every read validated, junk falls back to defaults
+- tests: +8 (169 total), incl. subprocess round-trips through the real
+  closeEvent path and an all-junk settings file
+- fee level deliberately NOT persisted here: it lives on world.config"
+```

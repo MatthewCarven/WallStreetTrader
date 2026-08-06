@@ -93,9 +93,10 @@ ticker + top-movers, a save/load browser and a new-world dialog (**Game** menu �
 `Ctrl+L`), a predictions dialog, a fees menu, an **Appearance** menu with an accent-colour picker
 (saved beside your games and applied next launch — panels, menus and chart frames recolour, while
 profit/loss and the rising/falling chart lines stay green/red), and a `:` command line that runs every
-CLI command. The
-keys match the TUI table above; **`Enter` or double-click** a row to trade, `?` for help. It resumes
-your last game and autosaves exactly like the TUI (they share the `saves/` slots).
+CLI command. The window also **remembers your session**: size & position, board view + sort, chart
+range and speed are saved on close (to the same `settings.json` as the accent) and restored next
+launch. The keys match the TUI table above; **`Enter` or double-click** a row to trade, `?` for
+help. It resumes your last game and autosaves exactly like the TUI (they share the `saves/` slots).
 
 > **Never-crash policy.** Every GUI action (and the live market tick) is wrapped so an unexpected
 > error is written to a rotating `logs/trader_pro.log` and quietly swallowed rather than taking down
@@ -205,7 +206,7 @@ data/
 scripts/
   build_seed.py            regenerates the seed files (deterministic)
   validate_engine.py, compare_profiles.py, cascade_demo.py, …   headless validation & charts
-tests/                     ~50 tests across 12 files
+tests/                     169 tests across 29 files
 docs/freeze-bug/           the Textual-regression investigation
 saves/                     runtime world saves (gitignored)
 ```
@@ -227,11 +228,12 @@ comes from the simulation, not the seed.
 ## Tests
 
 ```bash
-python -m pytest          # ~50 tests across 12 files
+python -m pytest          # 169 tests across 29 files
 ```
 
-Covers seed determinism, the world model, orders, margin/short behaviour, the event system,
-loans, predictions, profiles, and the CLI/TUI. The two trade-dialog freeze tests are
+Covers seed determinism, the world model, orders (market + resting stop/limit), margin/short
+behaviour, the event system, loans, predictions, profiles, persistence, GUI session memory, and
+all three front-ends. The Qt tests run offscreen in subprocesses and skip when PySide6 is absent. The two trade-dialog freeze tests are
 version-gated: they pass on `textual<0.72` and `xfail` on newer releases, so an unexpected
 pass will flag that the upstream regression is fixed and the cap can be lifted.
 

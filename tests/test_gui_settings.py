@@ -124,3 +124,42 @@ def test_scale_hex_clamps_and_brightens():
 def test_selection_scale_reproduces_default_green():
     # the ×0.6 rule is exactly where the original SELECTION #1c682f came from
     assert _scale_hex("#2fae4e", 0.6) == "#1c682f"
+
+
+# --------------------------------------------------------------------------- #
+# P1: settings_path / get_setting / update_settings
+# --------------------------------------------------------------------------- #
+
+def test_settings_path_env_override(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TRADER_PRO_SETTINGS_DIR", str(tmp_path / "cfg"))
+    assert S.settings_path() == tmp_path / "cfg" / "settings.json"
+    # and the no-path helpers resolve through it at call time
+    S.update_settings({"speed": 3})
+    assert S.get_setting("speed") == 3
+    assert (tmp_path / "cfg" / "settings.json").exists()
+
+
+def test_get_setting_returns_default_when_absent(tmp_path: Path):
+    p = tmp_path / "settings.json"
+    assert S.get_setting("view", "watchlist", p) == "watchlist"     # no file at all
+    S.save_settings({"other": 1}, p)
+    assert S.get_setting("view", "watchlist", p) == "watchlist"     # file, but no key
+    S.save_settings({"view": "stocks"}, p)
+    assert S.get_setting("view", "watchlist", p) == "stocks"
+
+
+def test_update_settings_merges_and_none_removes(tmp_path: Path):
+    p = tmp_path / "settings.json"
+    S.update_settings({"a": 1, "b": 2}, p)
+    S.update_settings({"b": 3, "c": True}, p)                       # merge preserves untouched keys
+    assert S.load_settings(p) == {"a": 1, "b": 3, "c": True}
+    S.update_settings({"a": None, "missing": None}, p)              # None removes; absent = no-op
+    assert S.load_settings(p) == {"b": 3, "c": True}
+    assert not list(tmp_path.glob(".tmp*"))                         # still atomic, no temp turds
+
+
+def test_accent_helpers_ride_the_generics(tmp_path: Path):
+    p = tmp_path / "settings.json"
+    S.update_settings({"keep": 9}, p)
+    S.set_accent_color("#3B82F6", p)                                # refactored onto update_settings
+    assert S.load_settings(p) == {"keep": 9, "accent": "#3b82f6"}
