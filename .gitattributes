@@ -1,0 +1,21 @@
+# Line endings.
+#
+# The repo stores text as LF; Git checks it out with your platform's native endings (CRLF on
+# Windows) and normalises back to LF on commit. Without this, files written from a Linux editor
+# or CI show up as whole-file diffs and Git warns "LF will be replaced by CRLF" on every add —
+# which is exactly what data/seeds/*.json and start.cmd have been doing.
+#
+# One-off after adding this file, to renormalise what's already committed:
+#     git add --renormalize .
+#     git commit -m "Normalise line endings via .gitattributes"
+* text=auto
+
+# Windows batch files must keep CRLF — some shells choke on LF-only .cmd/.bat.
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# Explicitly binary: never newline-convert, never diff as text.
+# (.world saves are JSON, not binary — but they live in the gitignored saves/ anyway.)
+*.png  binary
+*.ico  binary
+*.exe  binary
