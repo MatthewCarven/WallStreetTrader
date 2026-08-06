@@ -1760,3 +1760,79 @@ are now Select dropdowns seeded from the current world, matching the GUI.
   is the world you get
 MSG
 ```
+
+---
+
+## 2026-08-04 — P17: held keys stop flooding the TUI, and a .gitattributes
+
+Matthew hit a crash on quit and waved it off: *"its because I held down s and my repeat rate is
+higher than their maths calculated for."* The traceback was Textual's own
+(`Timer._run_timer` → `RuntimeError: cannot reuse already awaited coroutine`, during
+`asyncio.run()` shutdown, on his Python 3.14). Worth a look anyway, because *why* the app was
+still churning at shutdown is our business even if the exception isn't.
+
+**Couldn't reproduce the exception — found the cause of the pressure instead.** On Python 3.11 /
+Textual 0.71 in the container, hammering `s` through the pilot produced no shutdown error at all.
+But it produced a much more interesting number: **200 presses took 48 seconds.** Profiling the two
+halves:
+
+```
+_advance(1)        20.20 ms          _refresh()        12.51 ms
+_advance(1440)     20.49 ms          _render_chart()    1.62 ms
+```
+
+Two things fall out. Each `s` press costs ~33 ms of our own compute before Textual has painted
+anything — a full `_advance` plus a `_refresh` that *clears and rebuilds the entire board*. So a
+key-repeat rate above ~30/s queues work faster than the app can drain it, and the backlog is still
+unwinding when you quit. Matthew's read was right; the maths that didn't allow for his repeat rate
+was **ours**, not Textual's.
+
+And the second thing is the fix, sitting right there: **`_advance(1440)` costs the same as
+`_advance(1)`.** Advancing a whole day is as cheap as advancing a minute, because prices are a pure
+function of `(world_seed, tick)` (design.md §5.2) — `engine.advance` just moves the clock, and the
+per-advance work (interest, coupons, `process_pending`, one `fired_between`) is O(1) either way.
+So N presses never needed N advances.
+
+**A leading-edge rate limit, not a debounce.** `_request_steps` banks the ticks; the first press
+applies **immediately** (a tap feels exactly as it did, and the existing tests that step-then-assert
+keep working unchanged); repeats arriving inside a 50 ms window are batched and applied by
+`_drain_steps` as **one advance and one redraw**. Measured on a 100-press burst: **3039 ms → 58 ms,
+a 52× reduction**, and 2 redraws instead of 100. This is the shape the live-play loop has always
+used — `_on_timer` batches a whole timer tick's worth of minutes — so manual stepping was simply
+the odd one out.
+
+Three details worth recording:
+
+* **Events are now logged for `s`.** `action_step` used to log fills but *not* events, presumably
+  because one minute rarely has news. Now that a held `s` can cover an hour in one batch, silently
+  eating a black swan would be a real loss, so all three step actions log events and closures like
+  the play loop does.
+* **Modals.** A drain can be armed a moment before a modal opens, and `_refresh` can't query the
+  base-screen widgets from under one. `_drain_steps` bails out early in that case leaving the
+  ticks *banked* (not dropped), and the timer re-arms until the modal closes — the same bail-out
+  `_on_timer` has always done. Mutation-tested: remove the guard and the test dies on Textual's
+  `NoMatches`, which is exactly the crash it prevents.
+* **Fidelity, stated plainly.** Batched ticks mean resting stop/limit orders are evaluated on the
+  end-of-batch price, and one net-worth sample is recorded per batch rather than per minute — the
+  same end-point fidelity `+1d` and live play already have (design.md §5.2, and the L2 note above).
+  At a real key-repeat rate the batches are 2–3 minutes, so this is theoretical rather than felt;
+  it only grows when the app is behind, which is precisely when catching up is what you want.
+
+**Tests** — new `tests/test_tui_stepping.py` (+2). One pins the invariant the whole optimisation
+rests on: 60 single-tick advances and one 60-tick advance land on identical prices for 40 assets,
+so batching can never change *where* you end up. The other drives the pilot: a tap applies at once,
+50 repeats bank without moving the clock or redrawing, the drain applies all 51 in one go with
+**2 redraws not 51**, mixed `s`/`h`/`d` batch together correctly, and the modal case keeps its
+ticks and lands them afterwards. Both mutation-checked (remove the coalescing → fails; remove the
+modal guard → fails). Full suite **175 pass** (was 173).
+
+**Also: `.gitattributes`.** `* text=auto` with `*.cmd`/`*.bat` pinned to CRLF and png/ico/exe
+marked binary. This is what's behind the phantom `data/seeds/*.json` and `start.cmd` diffs that
+have been sitting in `git status` for weeks, and the "LF will be replaced by CRLF" warnings on
+every add of a file I wrote from the cloud container. After committing it, once:
+`git add --renormalize .` then commit the result.
+
+**Held back from disk deliberately.** His repo is still mid-merge from the force-push detour
+(README/WORKLOG/design.md carry conflict markers), and `git merge --abort` resets tracked files —
+so writing these edits now would risk them being discarded. Everything is delivered to him in
+chat; it lands on disk once he's aborted.

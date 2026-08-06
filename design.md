@@ -504,9 +504,16 @@ Sizes: **S** = an evening slice, **M** = a full session.
   still starts from any field — a `NewWorldSelect` subclass rebinds only `enter`, leaving
   `↑ ↓ / Space` to open the list.
 
+- [x] **P17 · Coalesced manual stepping** (S) — `s`/`h`/`d` advanced *and fully redrew the board*
+  once per key event, so the terminal's key-repeat rate decided how much work the app did (~33 ms
+  a press); holding a key queued work faster than it could drain. Now a leading-edge rate limit:
+  the first press applies instantly, repeats inside a 50 ms window batch into one advance + one
+  redraw. Leans on §5.2 — prices are pure in (seed, tick), so `_advance(n)` costs what
+  `_advance(1)` does. Measured 52× less work on a 100-press burst.
+
 **Dependencies:** P1 → {P5, P6, P12, P14} · P2 → P14 · P7 → {P8, P9}. Everything else can jump
 the queue. If the pass drags, cut P11 and the scanlines first. **Parked:** achievements (becomes
-P17 on request) and candlestick charts (a feature, not polish — needs OHLC aggregation).
+P18 on request) and candlestick charts (a feature, not polish — needs OHLC aggregation).
 
 ---
 

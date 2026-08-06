@@ -55,7 +55,7 @@ highlighted asset**, your positions, and a scrolling news log.
 |---|---|
 | `Space` | play / pause |
 | `[` / `]` | slower / faster |
-| `s` / `h` / `d` | step 1 minute / 1 hour / 1 day |
+| `s` / `h` / `d` | step 1 minute / 1 hour / 1 day (safe to hold — repeats batch) |
 | `0`–`4` | board view: 0 owned · 1 crypto · 2 stocks · 3 bonds · 4 watchlist |
 | `5` | top movers — biggest 1D% gainers & losers across the market |
 | `o` | sort the board by 1D % (toggle) |
@@ -206,7 +206,7 @@ data/
 scripts/
   build_seed.py            regenerates the seed files (deterministic)
   validate_engine.py, compare_profiles.py, cascade_demo.py, …   headless validation & charts
-tests/                     173 tests across 30 files
+tests/                     175 tests across 31 files
 docs/freeze-bug/           the Textual-regression investigation
 saves/                     runtime world saves (gitignored)
 ```
@@ -228,7 +228,7 @@ comes from the simulation, not the seed.
 ## Tests
 
 ```bash
-python -m pytest          # 173 tests across 30 files
+python -m pytest          # 175 tests across 31 files
 ```
 
 Covers seed determinism, the world model, orders (market + resting stop/limit), margin/short

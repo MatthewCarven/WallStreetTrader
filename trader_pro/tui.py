@@ -817,6 +817,8 @@ class TraderTUI(App):
         self._last_autosave = 0.0
         self._play_clock: float | None = None   # monotonic ts of the last live-play advance; None while
         self._tick_accum = 0.0                  # paused/modal-open. accum carries fractional ticks/sec.
+        self._pending_steps = 0                 # manual s/h/d ticks awaiting a batched advance
+        self._step_drain_scheduled = False      # …and whether a drain timer is already armed
         self._ticker_base = ""               # cached marquee string; sliced each timer for the scroll
         self._ticker_off = 0
         notable = ["AAPL", "MSFT", "NVDA", "AMZN", "JPM", "XOM", "GOOGL", "TSLA"]
@@ -1308,17 +1310,71 @@ class TraderTUI(App):
         self.speed_idx = max(self.speed_idx - 1, 0)
         self._refresh()
 
+    # ---- manual stepping (s / h / d), coalesced ---- #
+    #
+    # These used to advance and redraw once *per key event*, which made the terminal's key-repeat
+    # rate the thing deciding how much work the app did: hold `s` and every repeat cost a fresh
+    # `_advance` plus a full `_refresh` (which clears and rebuilds the whole board). Measured on a
+    # dev box that's ~33 ms of compute per press before Textual has even painted, so a fast repeat
+    # rate queues work faster than the app can drain it — the backlog is still unwinding when you
+    # quit.
+    #
+    # The fix leans on a property the engine has had since V0.3: **prices are a pure function of
+    # (world_seed, tick), so `_advance(n)` costs the same as `_advance(1)`** — advancing a whole
+    # day is ~20 ms, exactly like advancing a minute. So instead of N advances and N redraws we
+    # accumulate the requested ticks and apply them in ONE advance and ONE redraw, at most every
+    # `_STEP_DRAIN`. A held key now costs about what a single press costs. This is the same shape
+    # the live-play loop has always used (`_on_timer` batches a whole timer tick's worth of
+    # minutes); manual stepping was simply the odd one out.
+
+    # It's a **leading-edge** rate limit, not a debounce: the first press applies straight away, so
+    # a single tap is as instant as it ever was (and the existing tests, which step then assert,
+    # still see the world move synchronously). Only the repeats that arrive inside the window get
+    # batched — which is precisely the case that used to hurt.
+
+    _STEP_DRAIN = 0.05          # ≤20 redraws/sec however fast the key repeats; invisible on a tap
+
+    def _request_steps(self, ticks: int) -> None:
+        """Ask for `ticks` more sim-minutes. Applied now if the window is open, else batched."""
+        self._pending_steps += ticks
+        if not self._step_drain_scheduled:      # window open: apply immediately, then close it
+            self._drain_steps()
+            self._arm_step_drain()
+
+    def _arm_step_drain(self) -> None:
+        self._step_drain_scheduled = True
+        self.set_timer(self._STEP_DRAIN, self._on_step_drain_timer)
+
+    def _on_step_drain_timer(self) -> None:
+        """End of the window: apply anything that piled up, and reopen (or stand down)."""
+        self._step_drain_scheduled = False
+        if self._pending_steps:
+            self._drain_steps()
+            self._arm_step_drain()
+
+    def _drain_steps(self) -> None:
+        """Apply every banked tick in ONE advance + ONE redraw."""
+        # A modal owns the screen, so `_refresh` can't query the base widgets — leave the ticks
+        # banked and let the next timer try again, exactly as `_on_timer` bails out and waits.
+        if len(self.screen_stack) > 1:
+            return
+        ticks, self._pending_steps = self._pending_steps, 0
+        if ticks <= 0:
+            return
+        events, closures, fills = self.trader._advance(ticks)
+        self._log_fills(fills)
+        self._log_events(events)          # a held `s` can now cover hours — don't eat the news
+        self._log_closures(closures)
+        self._refresh()
+
     def action_step(self) -> None:
-        _ev, _clo, fills = self.trader._advance(1)
-        self._log_fills(fills); self._refresh()
+        self._request_steps(1)
 
     def action_hour(self) -> None:
-        ev, clo, fills = self.trader._advance(HOUR)
-        self._log_fills(fills); self._log_events(ev); self._log_closures(clo); self._refresh()
+        self._request_steps(HOUR)
 
     def action_day(self) -> None:
-        ev, clo, fills = self.trader._advance(DAY)
-        self._log_fills(fills); self._log_events(ev); self._log_closures(clo); self._refresh()
+        self._request_steps(DAY)
 
     def _quick_trade(self, side: OrderSide, qty: float) -> None:
         """Execute a quick trade for a given quantity of the highlighted asset."""
