@@ -19,8 +19,9 @@ from collections import namedtuple
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, Select, Static
 from rich.text import Text
 
 from .cli import TraderApp, money, fmt_qty
@@ -425,15 +426,46 @@ class OrdersScreen(ModalScreen):
         self.dismiss(None)
 
 
+class NewWorldSelect(Select):
+    """A dropdown whose **Enter starts the dialog** instead of opening the list.
+
+    The new-world modal promises "Enter start", and that promise should hold whichever field has
+    focus — otherwise Enter means "go" in two fields and "open a menu" in the other two, which is
+    exactly the kind of small inconsistency that makes a keyboard UI feel untrustworthy. ``↑`` /
+    ``↓`` / ``Space`` still open the dropdown, and while it *is* open Textual's own overlay
+    handles Enter to pick the highlighted option, so nothing is lost. (Subclass bindings override
+    the base class's per key, so only ``enter`` is rebound.)"""
+
+    BINDINGS = [Binding("enter", "start", "Start", show=False)]
+
+    class Start(Message):
+        """Enter was pressed while the dropdown was closed — the player wants to begin."""
+
+    def action_start(self) -> None:
+        self.post_message(self.Start())
+
+
 class NewWorldScreen(ModalScreen):
     """Ctrl+N — start a fresh world. Fields are pre-filled (seed re-rolled; profile/cash/fees
-    default to the current game). Enter starts, Esc cancels. Keyboard-driven, no Buttons."""
+    default to the current game). Enter starts, Esc cancels. Keyboard-driven, no Buttons.
+
+    Difficulty and fees are **dropdowns**, not text boxes: the old free-text inputs asked the
+    player to know *and spell* eight profile names that weren't even listed on screen, and a typo
+    silently kept the previous profile — the worst kind of failure, because the world you get
+    isn't the world you asked for. Now the choice is unmissable and unmisspellable, matching the
+    GUI's combo boxes. The dropdown labels stay short (``4. Normal``) so they never wrap; the
+    selected profile's tagline shows underneath and follows the highlight, which keeps the modal
+    narrow *and* teaches the 1–8 scale as you arrow through it."""
 
     CSS = """
     NewWorldScreen { align: center middle; }
-    #nw-box { width: 64; height: auto; border: round $primary; background: $panel; padding: 1 2; }
+    /* 70 wide keeps the longest profile tagline (62 chars) on one line, so the box doesn't
+       jump as you arrow down the difficulty list. */
+    #nw-box { width: 70; height: auto; border: round $primary; background: $panel; padding: 1 2; }
     #nw-box Input { margin: 0 0 1 0; }
+    #nw-box Select { margin: 0 0 1 0; }
     .nw-lbl { color: $text-muted; }
+    #nw-tagline { color: $text-muted; margin: 0 0 1 0; }
     """
     BINDINGS = [("escape", "cancel", "Cancel"),
                 Binding("ctrl+c", "app.force_quit", "Quit", priority=True)]
@@ -442,39 +474,77 @@ class NewWorldScreen(ModalScreen):
         super().__init__()
         self._closing = False
 
+    @staticmethod
+    def _profile_options() -> list[tuple[str, str]]:
+        """(label, value) pairs — short labels so the dropdown never wraps at width 64."""
+        from .core import PROFILE_NAMES, get_profile
+        return [(f"{get_profile(n).level}. {n}", n) for n in PROFILE_NAMES]
+
+    @staticmethod
+    def _fee_options() -> list[tuple[str, str]]:
+        """Fee levels with their actual rate, so the cost of the choice is visible up front."""
+        from .core.orders import FEE_LEVELS, FEE_RATES
+        return [(f"{lvl}  ({FEE_RATES[lvl] * 100:.2f}% per trade)", lvl) for lvl in FEE_LEVELS]
+
+    @staticmethod
+    def _tagline_for(profile: str) -> str:
+        from .core import get_profile
+        try:
+            return get_profile(profile).tagline
+        except Exception:
+            return ""
+
     def compose(self) -> ComposeResult:
         import random
+        from .core import PROFILE_NAMES
+        from .core.orders import FEE_LEVELS
         cfg = self.app.trader.world.config
+        # A world loaded from an older save could name a profile/fee level this build no longer
+        # has; fall back rather than hand Select a value that isn't in its options (it raises).
+        profile = cfg.profile if cfg.profile in PROFILE_NAMES else "Normal"
+        fee_level = cfg.fee_level if cfg.fee_level in FEE_LEVELS else "off"
         with Vertical(id="nw-box"):
-            yield Static("[b cyan]New world[/]   [dim](unsaved progress is lost — save first to keep it)[/]")
-            yield Static("profile", classes="nw-lbl")
-            yield Input(value=cfg.profile, id="nw-profile")
+            yield Static("[b cyan]New world[/]   [dim](unsaved progress is lost — save first)[/]")
+            yield Static("difficulty", classes="nw-lbl")
+            yield NewWorldSelect(self._profile_options(), value=profile, allow_blank=False,
+                                 id="nw-profile")
+            yield Static(self._tagline_for(profile), id="nw-tagline")
             yield Static("world seed", classes="nw-lbl")
             yield Input(value=str(random.randint(1, 99_999_999)), id="nw-seed")
             yield Static("starting cash", classes="nw-lbl")
             yield Input(value=f"{cfg.starting_cash:g}", id="nw-cash")
-            yield Static("fees  (off / low / medium / high / greedy / diabolic)", classes="nw-lbl")
-            yield Input(value=cfg.fee_level, id="nw-fees")
-            yield Static("[b]Enter[/] start   ·   [b]Tab[/] next field   ·   [b]Esc[/] cancel", classes="nw-lbl")
+            yield Static("fees", classes="nw-lbl")
+            yield NewWorldSelect(self._fee_options(), value=fee_level, allow_blank=False,
+                                 id="nw-fees")
+            yield Static("[b]Enter[/] start · [b]Tab[/] next · [b]↑↓[/] choose · [b]Esc[/] cancel",
+                         classes="nw-lbl")
 
     def on_mount(self) -> None:
-        self.query_one("#nw-profile", Input).focus()
+        self.query_one("#nw-profile", NewWorldSelect).focus()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Keep the tagline in step with the highlighted difficulty."""
+        if event.select.id == "nw-profile":
+            event.stop()
+            self.query_one("#nw-tagline", Static).update(self._tagline_for(str(event.value)))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._start()
+
+    def on_new_world_select_start(self, event: NewWorldSelect.Start) -> None:
+        """Enter on a closed dropdown — same as Enter in a text field."""
         event.stop()
         self._start()
 
     def _start(self) -> None:
         if self._closing:
             return
-        from .core import get_profile, PROFILE_NAMES
-        from .core.orders import FEE_LEVELS
         cfg = self.app.trader.world.config
-        raw = self.query_one("#nw-profile", Input).value.strip()
-        try:
-            get_profile(raw); profile = raw
-        except Exception:
-            profile = next((n for n in PROFILE_NAMES if n.lower() == raw.lower()), cfg.profile)
+        # Both dropdowns are allow_blank=False over known-good values, so no parsing or
+        # spell-checking is needed any more — only the free-text numbers can still be junk.
+        profile = str(self.query_one("#nw-profile", NewWorldSelect).value)
+        fee_level = str(self.query_one("#nw-fees", NewWorldSelect).value)
         try:
             seed = int(self.query_one("#nw-seed", Input).value.strip())
         except ValueError:
@@ -483,8 +553,6 @@ class NewWorldScreen(ModalScreen):
             cash = max(1.0, float(self.query_one("#nw-cash", Input).value.strip().lstrip("$").replace(",", "")))
         except ValueError:
             cash = cfg.starting_cash
-        fee_raw = self.query_one("#nw-fees", Input).value.strip().lower()
-        fee_level = fee_raw if fee_raw in FEE_LEVELS else cfg.fee_level
         self._closing = True
         self.dismiss((profile, seed, cash, fee_level))
 

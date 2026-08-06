@@ -62,7 +62,7 @@ highlighted asset**, your positions, and a scrolling news log.
 | `c` | cycle the chart range (1H → 1D → 3D → 1W) |
 | `Enter` | open the trade dialog for the highlighted asset |
 | `:` | command line (every CLI command below works) |
-| `Ctrl+N` | new world |
+| `Ctrl+N` | new world — difficulty & fees are dropdowns (`↑↓` choose, `Enter` starts) |
 | `Ctrl+S` / `Ctrl+L` | save · load (the load browser lists slots with net worth, return, and age) |
 | `?` | help · `q` quit (autosaves first) |
 
@@ -206,7 +206,7 @@ data/
 scripts/
   build_seed.py            regenerates the seed files (deterministic)
   validate_engine.py, compare_profiles.py, cascade_demo.py, …   headless validation & charts
-tests/                     169 tests across 29 files
+tests/                     173 tests across 30 files
 docs/freeze-bug/           the Textual-regression investigation
 saves/                     runtime world saves (gitignored)
 ```
@@ -228,7 +228,7 @@ comes from the simulation, not the seed.
 ## Tests
 
 ```bash
-python -m pytest          # 169 tests across 29 files
+python -m pytest          # 173 tests across 30 files
 ```
 
 Covers seed determinism, the world model, orders (market + resting stop/limit), margin/short

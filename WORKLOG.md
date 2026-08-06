@@ -1679,3 +1679,84 @@ and speed in settings.json, restoring at boot and persisting on close.
   closeEvent path and an all-junk settings file
 - fee level deliberately NOT persisted here: it lives on world.config"
 ```
+
+---
+
+## 2026-08-04 — P16: the TUI new-world modal stops asking you to spell
+
+Matthew, on the new-game dialog: *"the difficulty has to be typed in and that is going to require
+users both know and can spell (despite being shown), and this is just too much to ask of a
+'normal' human apparently."* Worth pinning down **which** dialog first — the GUI's `NewWorldDialog`
+has used `QComboBox` for profile and fees since it was written, and the CLI lists the profiles as a
+numbered 1–8 menu. The offender was the **TUI's Ctrl+N modal**: profile was a bare `Input` with the
+eight names *not shown anywhere on the screen*, and the fallback made it worse —
+
+```python
+profile = next((n for n in PROFILE_NAMES if n.lower() == raw.lower()), cfg.profile)
+```
+
+— a typo silently kept your **previous** profile. You'd press Enter, get a world, and it wouldn't
+be the world you asked for, with nothing on screen to tell you. That's the real bug; the spelling
+was just the trigger.
+
+**Both dropdowns now.** `Select` for difficulty and fees, `allow_blank=False`, seeded from the
+running world's config (with a fallback if an old save names a profile this build no longer has —
+`Select` raises on a value outside its options). Labels stay short (`4. Normal`) so they can't
+wrap; the **selected profile's tagline shows underneath and follows the highlight**, which keeps
+the box narrow while teaching the 1–8 scale as you arrow through it. Fee options carry their real
+rate (`medium  (0.30% per trade)`) so the cost of the choice is visible before you commit.
+`_start()` lost all its parsing and spell-checking — the dropdown values are known-good by
+construction; only seed and cash can still be junk, and they keep their existing fallbacks.
+
+**The Enter problem.** Textual's `Select` binds `enter` to *open the dropdown*, which would have
+broken the modal's "Enter start" promise for two of its four fields — Enter meaning "go" here and
+"open a menu" there is exactly the small inconsistency that makes a keyboard UI feel untrustworthy.
+Fixed with a five-line `NewWorldSelect(Select)` that rebinds **only** `enter` to post a `Start`
+message (subclass BINDINGS override the base per key — verified, `down`/`space`/`up` still open the
+list). So: Enter always starts; ↑ ↓ / Space open a dropdown; while one *is* open, Textual's own
+overlay handles Enter to pick. Esc closes an open dropdown first, then cancels the modal — a free
+consequence of the overlay's own binding, and the right behaviour.
+
+**Cosmetics.** Box widened 64 → 70 so the longest tagline (Normal's, 62 chars) stays on one line
+and the modal doesn't jump as you arrow down the list; the header and key-hint lines were trimmed
+to stop them wrapping ("…save first to keep / it)" and "…Esc / cancel" both wrapped before, and the
+new hint line is longer). Verified visually by exporting real SVG screenshots from the pilot
+(`app.export_screenshot()`) and rasterising them — closed and open states both checked, no wraps.
+
+**Tests** — new `tests/test_tui_new_world.py` (+4): three pure ones (all 8 profiles present in
+scale order with short labels, fee labels carry the true rate, `_tagline_for` can't raise on junk)
+and one pilot scenario that opens the modal, checks it's pre-selected and focused on difficulty,
+asserts **no free-text field remains** except seed/cash, watches the tagline follow a change,
+presses Enter *from the dropdown* and confirms the world that comes back is the one picked
+(profile, fees and seed all), then checks ↑ opens the list instead of starting and the two-stage
+Esc. Mutation-checked all three behaviours: drop the `enter` rebinding, hardcode `profile =
+cfg.profile` (i.e. reintroduce the old silent-fallback bug), or stop updating the tagline — each
+fails the scenario. Full suite **173 pass** (was 169). README's TUI key table and test counts
+updated; design.md §11 gained P16 under "unplanned, shipped on sight" (achievements shuffles to
+P17).
+
+**Commit is Matthew's to run:**
+
+```
+git add design.md README.md WORKLOG.md trader_pro/tui.py tests/test_tui_new_world.py
+git commit -F- <<'MSG'
+P16: TUI new-world modal — difficulty & fees are dropdowns
+
+The Ctrl+N modal asked players to type a profile name that was never
+shown on screen, and a typo silently kept the previous profile — so you
+could start a world you didn't choose, with no indication. Both fields
+are now Select dropdowns seeded from the current world, matching the GUI.
+
+- short "4. Normal" labels; the selected profile's tagline follows the
+  highlight underneath, so the 1-8 scale teaches itself
+- fee options show their real rate (medium -> 0.30% per trade)
+- NewWorldSelect rebinds only `enter` (-> start) so the modal's
+  "Enter start" promise holds in every field; up/down/space still open
+  the list, and the overlay keeps Enter for picking
+- _start() drops all profile/fee parsing: dropdown values are valid by
+  construction
+- box 64 -> 70 so the longest tagline doesn't wrap or jump the layout
+- tests: +4 (173 total), incl. a pilot scenario proving the picked world
+  is the world you get
+MSG
+```

@@ -495,9 +495,18 @@ Sizes: **S** = an evening slice, **M** = a full session.
 - [ ] **P15 · Icon, About, exe diet** (M) — programmatically drawn candlestick icon, About dialog
   with version, PyInstaller excludes to shrink the ~105 MB one-file exe.
 
+**Unplanned, shipped on sight**
+
+- [x] **P16 · TUI new-world picker** (S) — difficulty and fees were free-text `Input`s in the
+  Ctrl+N modal, and the eight profile names weren't even listed; a typo silently kept your old
+  profile, so you'd start a world you didn't ask for. Both are now `Select` dropdowns (short
+  `4. Normal` labels, the selected profile's tagline live underneath), matching the GUI. Enter
+  still starts from any field — a `NewWorldSelect` subclass rebinds only `enter`, leaving
+  `↑ ↓ / Space` to open the list.
+
 **Dependencies:** P1 → {P5, P6, P12, P14} · P2 → P14 · P7 → {P8, P9}. Everything else can jump
 the queue. If the pass drags, cut P11 and the scanlines first. **Parked:** achievements (becomes
-P16 on request) and candlestick charts (a feature, not polish — needs OHLC aggregation).
+P17 on request) and candlestick charts (a feature, not polish — needs OHLC aggregation).
 
 ---
 
