@@ -511,9 +511,20 @@ Sizes: **S** = an evening slice, **M** = a full session.
   redraw. Leans on §5.2 — prices are pure in (seed, tick), so `_advance(n)` costs what
   `_advance(1)` does. Measured 52× less work on a 100-press burst.
 
+- [ ] **P18 · Honest change columns** (S) — on a young world every lookback clamps to tick 0, so
+  1D / 7D / 31D show the *same* number (see the D0 00:31 screenshot: BTR −1.46% three times).
+  Correct, but indistinguishable from a broken column. Show `—` until there's real history behind
+  each window, the way the chart pane already says "(not enough data yet)". Touches `_chgNd`
+  (`tui.py`) and `chg_pct` (`gui/model.py`); **mind the sorters** — movers and sort-by-1D% sort on
+  these values and must not trip over the empty case.
+- [ ] **P19 · Ticker precision** (XS) — the tape hardcodes `f"{price:,.2f}"`, so every sub-cent coin
+  reads `FRG 0.00` while the board right below shows `$0.0000001834`. `fmt.money()` already solves
+  this (it keeps ~4 significant figures under a cent) and is already imported — a one-line swap in
+  `_build_ticker` (`tui.py`) and the same in `ticker_text` (`gui/model.py`).
+
 **Dependencies:** P1 → {P5, P6, P12, P14} · P2 → P14 · P7 → {P8, P9}. Everything else can jump
 the queue. If the pass drags, cut P11 and the scanlines first. **Parked:** achievements (becomes
-P18 on request) and candlestick charts (a feature, not polish — needs OHLC aggregation).
+P20 on request) and candlestick charts (a feature, not polish — needs OHLC aggregation).
 
 ---
 

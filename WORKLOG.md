@@ -1836,3 +1836,38 @@ every add of a file I wrote from the cloud container. After committing it, once:
 (README/WORKLOG/design.md carry conflict markers), and `git merge --abort` resets tracked files —
 so writing these edits now would risk them being discarded. Everything is delivered to him in
 chat; it lands on disk once he's aborted.
+
+---
+
+## 2026-08-04 — session close: TODO.md + two nits filed
+
+Matthew needed to shut down, so this is a deliberate stopping point rather than a slice.
+
+Everything from today is committed and pushed (`c401f52`): **P1** (GUI session memory), **P16**
+(TUI new-world dropdowns), **P17** (coalesced held-key stepping), and the `.gitattributes`.
+Working tree clean, **175 tests pass**, nothing half-finished to reconstruct.
+
+**New `TODO.md`** at the repo root — a short "where we stopped, what's next" note that points at
+design.md §11 for the full backlog rather than copying it, so the two can't drift. It carries the
+current state, the next slice with its actual blocker written out, and the working notes that cost
+real time to rediscover (how to run the suite from a cloud session, why the Qt tests live in
+subprocesses, how the Textual screenshots are made, the `<0.72` pin).
+
+**Two nits filed as P18/P19** from a screenshot of a 31-minute-old world (achievements shuffles to
+P20):
+
+* **P18** — every lookback clamps to `max(0, t - n*DAY)`, so on a young world 1D / 7D / 31D all
+  measure from tick 0 and print the *same* number (BTR −1.46% three times). Mathematically honest,
+  visually identical to a broken column; the chart pane next door already handles this properly
+  with "(not enough data yet)". Flagged the sorting gotcha: movers and sort-by-1D% sort on these
+  values, so whatever represents "no data" has to survive `sorted()`.
+* **P19** — the ticker tape hardcodes `f"{price:,.2f}"` and renders every sub-cent coin as
+  `FRG 0.00`, while the board directly below shows `$0.0000001834`. `fmt.money()` was *written* for
+  exactly this (it keeps ~4 significant figures under a cent), is already imported at both call
+  sites, and the GUI's `ticker_text` has the identical bug. Close to a one-line fix in each.
+
+**Next slice is P2** (live accent repaint). Its blocker is written into TODO.md so it can start
+cold: `gui/model.py` binds the palette as module-level names at import time and `gui/app.py` bakes
+those into stylesheet strings when widgets are built, so rebinding later does nothing — the work is
+routing the palette through a mutable theme object and restyling live widgets. The
+accent-vs-P&L-semantics split must survive it.
