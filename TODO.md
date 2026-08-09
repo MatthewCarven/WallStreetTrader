@@ -3,18 +3,17 @@
 Short, current, and disposable. The **full backlog lives in [`design.md` §11](design.md)**; this
 file is just "where we stopped and what to do next", so the two never drift apart.
 
-Last touched: **2026-08-09**, on top of commit `3a54dd3`.
+Last touched: **2026-08-09**, at commit `b102a41` (pushed to `origin/master`).
 
 ---
 
 ## State right now
 
-**Uncommitted**: P19, P18, P21 and P2 are done, tested and green in the working tree — they still
-need a commit and a push. Nothing is half-finished.
+Everything is committed, pushed, and green. Working tree clean.
 
 * **186 tests pass** — `python -m pytest` (needs `textual<0.72`, plus `PySide6` + `pyqtgraph` for
   the Qt tests, which skip if it isn't installed). Ran three times clean after each slice.
-* Shipped this session:
+* Shipped this session — **all four landed in the single commit `b102a41`** (see the note below):
   * **P19 · Ticker precision** — the tape uses `fmt.money()`, so `PEPE2 $0.00000007272` instead
     of `PEPE2 0.00`. Both front-ends.
   * **P18 · Honest change columns** — 1D / 7D / 31D show a dim `—` until the world is actually
@@ -29,19 +28,13 @@ need a commit and a push. Nothing is half-finished.
     re-run on `set_accent()`. "Restart to apply" is gone.
 * Every new test was mutation-checked: revert the fix, watch the test fail, restore. Six
   mutations across the four slices, six catches.
+* Nothing is half-finished. There is no work-in-progress to reconstruct.
 
-### Commit these first
-
-```
-git add -A
-git commit -m "P19: ticker uses fmt.money() so sub-cent coins keep their digits" -m "The tape hardcoded :,.2f, so every penny coin read `FRG 0.00` while the board right below showed $0.0000001834. Swapped _build_ticker (tui) and ticker_text (gui/model) to money(), which keeps ~4 significant figures under a cent."
-git commit -m "P18: change columns read - until the lookback is real" -m "On a young world every window clamps to tick 0, so 1D/7D/31D printed the same number - correct, but indistinguishable from a broken column. Display now goes through _chg_col/chg_col (None until _has_window/has_window) and a shared _pct_cell. Sorters still call _chgNd/chg_pct so movers and sort-by-1D% keep ranking by change-since-open; the movers header hint says 'since open' while that is what it ranks by."
-git commit -m "P21: the ticker timer survives app teardown" -m "The 0.3s interval can fire once after the app is gone; #ticker no longer exists and screen_stack is back to 1, so the modal guard missed it and _tick_ticker raised NoMatches. Made the suite intermittently red. Bail out of _on_timer when not is_running."
-git commit -m "P2: the accent picker applies live, no restart" -m "ACCENT/ACCENT_HI/SELECTION were module constants resolved at import and baked into stylesheet strings at widget-build time, so rebinding did nothing. They now live on a mutable THEME object read at format time; the constants are deleted and a test keeps them gone. Accent styling on long-lived widgets moved into two re-runnable passes (_apply_theme and the new _style_panels) that set_accent re-runs. GREEN/GREEN_HI/RED stay module constants - P&L semantics are not themeable."
-git push
-```
-
-(One `git add -A` then four commits as written, or `git add -p` if you want them truly separate.)
+> **Why one commit for four slices.** The handover block in this file said `git add -A` and *then*
+> four `git commit` lines — `-A` stages the whole tree, so the first commit took everything and the
+> other three reported "nothing to commit". `b102a41` is complete and correct; only its message is
+> narrow. An empty annotation commit records that. **Next time: one explicit `git add <paths>` per
+> commit, never a single `git add -A` up front.**
 
 ---
 
@@ -51,7 +44,9 @@ git push
 
 Rotate `autosave` → `.1` → `.2`; a corrupt newest falls back down the chain at resume. Lives in
 `trader_pro/persistence.py` (`autosave_path`, `has_autosave`, `load_game`) with the resume paths
-in `gui/model.boot()` and `tui.run_tui()`. Small and self-contained.
+in `gui/model.boot()` and `tui.run_tui()`. Small and self-contained — the interesting part is the
+fallback test: write a deliberately corrupt newest generation and assert resume lands on `.1`
+with the world intact.
 
 ### 2. Then Wave B — feel
 
@@ -86,4 +81,5 @@ named accents passed to `TraderGUI.set_accent()`.
   `_style_panels()` rather than inline — otherwise it silently stops following the picker.
   Modal dialogs are exempt: they're rebuilt on every open.
 * **Commits and pushes are Matthew's to run**, from PowerShell: repeated `-m` flags, never a
-  heredoc.
+  heredoc, no backticks inside the message (PowerShell's escape character). **One explicit
+  `git add <paths>` per commit** — see the note above.
