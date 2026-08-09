@@ -707,17 +707,28 @@ class LoadScreen(ModalScreen):
 # bindings, and the Ctrl+N help line in sync if you add or reorder columns.
 _RowCtx = namedtuple("_RowCtx", "sym price chg chg7d chg31d qty value cost pnl")
 
+
+def _pct_cell(v: float | None) -> Text:
+    """One change-column cell. ``None`` means the world isn't old enough for that lookback yet:
+    every window shorter than the world's age clamps to tick 0, so 1D / 7D / 31D would all print
+    the *same* number — correct, but indistinguishable from a broken column. A dim em dash says
+    "not yet", the way the chart pane already says "(not enough data yet)"."""
+    if v is None:
+        return Text("—", style="dim", justify="right")
+    return Text(f"{v:+.2f}%", style="green" if v >= 0 else "red", justify="right")
+
+
 BOARD_COLUMNS = [
     ("symbol", "Symbol",
         lambda c: Text(c.sym, style="bold")),
     ("price", "Price",
         lambda c: Text(money(c.price), justify="right")),
     ("chg", "1D %",
-        lambda c: Text(f"{c.chg:+.2f}%", style="green" if c.chg >= 0 else "red", justify="right")),
+        lambda c: _pct_cell(c.chg)),
     ("chg7d", "7D %",
-        lambda c: Text(f"{c.chg7d:+.2f}%", style="green" if c.chg7d >= 0 else "red", justify="right")),
+        lambda c: _pct_cell(c.chg7d)),
     ("chg31d", "31D %",
-        lambda c: Text(f"{c.chg31d:+.2f}%", style="green" if c.chg31d >= 0 else "red", justify="right")),
+        lambda c: _pct_cell(c.chg31d)),
     ("pos", "Pos",
         lambda c: Text(fmt_qty(c.qty) if c.qty else "·", justify="right",
                        style="yellow" if c.qty < 0 else ("white" if c.qty else "dim"))),
@@ -871,6 +882,12 @@ class TraderTUI(App):
     # ---- live clock ---- #
 
     def _on_timer(self) -> None:
+        # The 0.3s interval can fire once more *after* the app has been torn down (quit, or a
+        # test pilot exiting), and by then #ticker is gone -- `screen_stack` is back to 1, so the
+        # modal guard below doesn't cover it, and _tick_ticker raised NoMatches. Rare in play,
+        # but it made the suite intermittently red. Nothing to scroll if we're not running.
+        if not self.is_running:
+            return
         # While a modal (Help / Trade / New-world) is up it owns the screen, so the base-screen
         # widgets (#ticker/#board/...) aren't queryable -- and the market effectively pauses.
         # Drop the play baseline so no real time is banked across the modal (or a pause).
@@ -930,15 +947,28 @@ class TraderTUI(App):
     # ---- shared math ---- #
 
     def _chgNd(self, aid: str, num_days: int) -> float:
-        """N-day % change for an asset (price now vs N days ago)."""
+        """N-day % change for an asset (price now vs N days ago).
+
+        Always a number, even on a world younger than the window — the lookback clamps to tick 0,
+        so you get "change since the world opened". That's the right thing for *ordering* (movers,
+        sort-by-%), which is why every sorter calls this. Display columns go through
+        :meth:`_chg_col` instead, which withholds the number until the window is real."""
         w, eng = self.trader.world, self.trader.engine
         t = w.market.tick_index
         price = w.price(aid)
         prev = eng.price_at(aid, max(0, t - num_days * DAY))
         return (price / prev - 1) * 100 if prev > 0 else 0.0
 
+    def _has_window(self, num_days: int) -> bool:
+        """True once the world is old enough for an honest `num_days`-day lookback."""
+        return self.trader.world.market.tick_index >= num_days * DAY
+
+    def _chg_col(self, aid: str, num_days: int) -> float | None:
+        """The *display* value for a change column: ``None`` until a full window exists."""
+        return self._chgNd(aid, num_days) if self._has_window(num_days) else None
+
     def _chg1d(self, aid: str) -> float:
-        """1-day % change for an asset (price now vs one DAY ago)."""
+        """1-day % change for an asset (price now vs one DAY ago). Sort key — never ``None``."""
         return self._chgNd(aid, 1)
 
     def _movers(self, n: int = 10) -> tuple[list[tuple[float, str]], list[tuple[float, str]]]:
@@ -960,7 +990,9 @@ class TraderTUI(App):
                 continue
             chg = self._chg1d(aid)
             arr = "▲" if chg >= 0 else "▼"
-            segs.append(f"{aid.split(':',1)[1]} {w.price(aid):,.2f} {arr}{abs(chg):.1f}%")
+            # money() (not `:,.2f`) so sub-cent coins keep ~4 significant figures — a hardcoded
+            # 2dp printed every penny coin as `0.00` while the board below showed $0.0000001834.
+            segs.append(f"{aid.split(':',1)[1]} {money(w.price(aid))} {arr}{abs(chg):.1f}%")
         self._ticker_base = "     ".join(segs) + "     " if segs else ""
 
     def _tick_ticker(self) -> None:
@@ -1088,7 +1120,11 @@ class TraderTUI(App):
             if not cells:
                 cells.append(label)
             elif hint_1d and cid == "chg":
-                cells.append(Text("1D %", style="dim", justify="right"))
+                # Movers always ranks by _chg1d. Before the world is a day old that number is
+                # really "since open", and the 1D % cells below read `—`, so say so — otherwise
+                # the board looks ordered by a column with nothing in it.
+                cells.append(Text("1D %" if self._has_window(1) else "since open",
+                                  style="dim", justify="right"))
             else:
                 cells.append(Text(""))
         table.add_row(*cells, key=key)
@@ -1097,9 +1133,9 @@ class TraderTUI(App):
         w = self.trader.world
         pf = w.portfolio
         price = w.price(aid)
-        chg = self._chgNd(aid, 1)
-        chg7d = self._chgNd(aid, 7)
-        chg31d = self._chgNd(aid, 31)
+        chg = self._chg_col(aid, 1)
+        chg7d = self._chg_col(aid, 7)
+        chg31d = self._chg_col(aid, 31)
         pos = pf.positions.get(aid)
         qty = pos.quantity if pos else 0.0
         cost = pos.avg_cost if pos else 0.0

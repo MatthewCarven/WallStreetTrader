@@ -91,8 +91,9 @@ equity curve and asset fundamentals, a positions table, a **blue→amber→red m
 margin-call popup, an activity feed **that logs market news and your own buy/sell fills** + scrolling
 ticker + top-movers, a save/load browser and a new-world dialog (**Game** menu · `Ctrl+N` / `Ctrl+S` /
 `Ctrl+L`), a predictions dialog, a fees menu, an **Appearance** menu with an accent-colour picker
-(saved beside your games and applied next launch — panels, menus and chart frames recolour, while
-profit/loss and the rising/falling chart lines stay green/red), and a `:` command line that runs every
+(applied the instant you pick it — panels, menus, chart frames and row highlights recolour live,
+while profit/loss and the rising/falling chart lines stay green/red — and saved beside your games
+for next launch), and a `:` command line that runs every
 CLI command. The window also **remembers your session**: size & position, board view + sort, chart
 range and speed are saved on close (to the same `settings.json` as the accent) and restored next
 launch. The keys match the TUI table above; **`Enter` or double-click** a row to trade, `?` for

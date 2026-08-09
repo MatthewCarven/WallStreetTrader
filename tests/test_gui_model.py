@@ -123,6 +123,60 @@ def test_visible_ids_sort_orders_by_change_desc():
     assert chgs == sorted(chgs, reverse=True)
 
 
+def test_change_columns_are_dashes_until_the_window_is_real():
+    """P18: on a young world every lookback clamps to tick 0, so 1D / 7D / 31D all showed the
+    *same* number — correct, but indistinguishable from a broken column. Each window stays a
+    dim `—` until the world is actually old enough for it, then lights up."""
+    from trader_pro.gui.model import chg_col, has_window
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    trader = TraderApp(world, universe=uni)
+    eng = trader.engine
+    aid = kind_ids(world, AssetKind.STOCK)[0]
+
+    trader._advance(31)                                  # 31 minutes in — the screenshot's world
+    assert not has_window(world, 1)
+    ctx = row_ctx(world, eng, aid)
+    assert ctx.chg is None and ctx.chg7d is None and ctx.chg31d is None
+    for col in ("chg", "chg7d", "chg31d"):
+        c = cell(ctx, col)
+        assert c.text == "—" and c.color == DIM
+
+    trader._advance(2 * 1440)                            # past a day: 1D lights up, 7D/31D don't
+    assert has_window(world, 1) and not has_window(world, 7)
+    ctx = row_ctx(world, eng, aid)
+    assert ctx.chg == chg_col(world, eng, aid, 1) is not None
+    assert cell(ctx, "chg").text.endswith("%")
+    assert cell(ctx, "chg7d").text == "—" and cell(ctx, "chg31d").text == "—"
+
+    trader._advance(40 * 1440)                           # past a month: all three are real
+    ctx = row_ctx(world, eng, aid)
+    assert all(cell(ctx, c).text.endswith("%") for c in ("chg", "chg7d", "chg31d"))
+    # …and they no longer agree, which was the whole complaint
+    assert len({cell(ctx, c).text for c in ("chg", "chg7d", "chg31d")}) == 3
+
+
+def test_sorters_still_see_a_number_on_a_young_world():
+    """The `—` is display-only. movers and sort-by-1D% rank by chg_pct, which keeps returning
+    change-since-open on a young world — blanking *that* would break the ordering."""
+    from trader_pro.gui.model import movers_ids, ticker_text
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Volatile", starting_cash=5000.0)
+    trader = TraderApp(world, universe=uni)
+    eng = trader.engine
+    trader._advance(31)                                  # too young for any window
+    stocks = kind_ids(world, AssetKind.STOCK)
+    ids, _ = visible_ids(world, eng, view_source=stocks, owned_only=False, sort_by_change=True,
+                         watch=default_watchlist(world), view_page=0, page_size=25)
+    chgs = [chg_pct(world, eng, a, 1) for a in ids]
+    assert chgs == sorted(chgs, reverse=True)            # still a real ordering
+    assert any(c != 0.0 for c in chgs)                   # …on real, non-blank numbers
+    m = movers_ids(world, eng, n=8)                      # 8 gainers + 8 losers, deduped
+    assert len(m) == 16 and m == list(dict.fromkeys(m))
+    tape = ticker_text(world, eng, default_watchlist(world))
+    assert "▲" in tape or "▼" in tape                    # the tape arrow still resolves
+
+
 def test_chart_ranges_defined():
     from trader_pro.gui.model import CHART_RANGES
     assert [label for label, _ in CHART_RANGES] == ["1H", "1D", "3D", "1W"]
@@ -215,6 +269,23 @@ def test_movers_ids_and_ticker_text():
     assert all(world.has_asset(a) for a in m)
     tape = ticker_text(world, trader.engine, default_watchlist(world))
     assert ("▲" in tape or "▼" in tape) and len(tape) > 0
+
+
+def test_ticker_keeps_sub_cent_precision():
+    """P19: the tape hardcoded `:,.2f`, so every penny coin read `FRG 0.00` while the board
+    right below it showed $0.0000001834. It must use money(), which keeps ~4 sig figs."""
+    from trader_pro.fmt import money
+    from trader_pro.gui.model import ticker_text
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    trader = TraderApp(world, universe=uni)
+    watch = default_watchlist(world)[:18]               # only the head of the list reaches the tape
+    cheap = min(watch, key=world.price)
+    assert world.price(cheap) < 0.01, "seed universe no longer has a sub-cent coin to test with"
+    tape = ticker_text(world, trader.engine, watch)
+    sym = cheap.split(":", 1)[1]
+    assert f"{sym} {money(world.price(cheap))} " in tape
+    assert f"{sym} 0.00 " not in tape                   # the pre-fix rendering
 
 
 def test_event_and_closure_entry():

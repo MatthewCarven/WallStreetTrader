@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from textual.widgets import DataTable, Static  # noqa: E402
 from trader_pro.tui import TraderTUI, area_chart, CHART_RANGES  # noqa: E402
 from trader_pro.cli import TraderApp  # noqa: E402
+from trader_pro.fmt import money  # noqa: E402
 from trader_pro.core import load_seed_universe, World  # noqa: E402
 
 
@@ -49,6 +50,14 @@ async def _scenario() -> None:
         app._tick_ticker()
         assert app._ticker_off != off0
         assert app.query_one("#ticker", Static).renderable.plain.strip()
+
+        # P19: sub-cent coins keep their significant figures instead of reading `SYM 0.00`
+        watched = [a for a in app.watch[:18] if app.trader.world.has_asset(a)]
+        cheap = min(watched, key=app.trader.world.price)
+        assert app.trader.world.price(cheap) < 0.01, "no sub-cent coin on the tape to test with"
+        sym = cheap.split(":", 1)[1]
+        assert f"{sym} {money(app.trader.world.price(cheap))} " in app._ticker_base
+        assert f"{sym} 0.00 " not in app._ticker_base
 
         # chart pane tracks the highlighted asset across every range
         await pilot.press("2")                   # stocks

@@ -459,8 +459,17 @@ Sizes: **S** = an evening slice, **M** = a full session.
 - [ ] **P1 · Settings expansion + session restore** (M) — generic get/set in `gui/settings.py`;
   persist & restore window geometry, board view + sort, chart range, speed. Fee level is
   deliberately excluded — it lives in `world.config` and travels with the save, not the install.
-- [ ] **P2 · Live accent repaint** (M) — route the palette through a mutable theme object so the
-  picker applies instantly; retires "restart to apply". Unlocks P14.
+- [x] **P2 · Live accent repaint** (M) — the palette now lives on a mutable `THEME` object in
+  `gui/model.py` that every stylesheet f-string reads at *format* time; the module-level
+  `ACCENT` / `ACCENT_HI` / `SELECTION` constants are gone, and a test asserts they stay gone
+  (a stale import-time copy of the palette **was** the bug). Long-lived accent styling moved out
+  of widget construction into two re-runnable passes — `_apply_theme()` (window stylesheet:
+  buttons, menus, table selection, headers) and `_style_panels()` (both pyqtgraph charts'
+  borders + axis pens, the news list, the command line) — so `set_accent()` just mutates THEME,
+  re-runs both, and regenerates the two accent-coloured HTML labels. Modal dialogs needed no
+  work: they read THEME when constructed, and they're constructed each time you open them.
+  "Restart to apply" is gone from the picker, the reset action, and the README. `GREEN` /
+  `GREEN_HI` / `RED` stayed module constants — P&L semantics are not themeable. Unlocks P14.
 - [ ] **P3 · Autosave generations** (S) — rotate `autosave` → `.1` → `.2`; a corrupt newest
   falls back down the chain at resume.
 
@@ -511,16 +520,32 @@ Sizes: **S** = an evening slice, **M** = a full session.
   redraw. Leans on §5.2 — prices are pure in (seed, tick), so `_advance(n)` costs what
   `_advance(1)` does. Measured 52× less work on a 100-press burst.
 
-- [ ] **P18 · Honest change columns** (S) — on a young world every lookback clamps to tick 0, so
-  1D / 7D / 31D show the *same* number (see the D0 00:31 screenshot: BTR −1.46% three times).
-  Correct, but indistinguishable from a broken column. Show `—` until there's real history behind
-  each window, the way the chart pane already says "(not enough data yet)". Touches `_chgNd`
-  (`tui.py`) and `chg_pct` (`gui/model.py`); **mind the sorters** — movers and sort-by-1D% sort on
-  these values and must not trip over the empty case.
-- [ ] **P19 · Ticker precision** (XS) — the tape hardcodes `f"{price:,.2f}"`, so every sub-cent coin
-  reads `FRG 0.00` while the board right below shows `$0.0000001834`. `fmt.money()` already solves
-  this (it keeps ~4 significant figures under a cent) and is already imported — a one-line swap in
-  `_build_ticker` (`tui.py`) and the same in `ticker_text` (`gui/model.py`).
+- [x] **P18 · Honest change columns** (S) — on a young world every lookback clamped to tick 0, so
+  1D / 7D / 31D showed the *same* number (the D0 00:31 screenshot: BTR −1.46% three times).
+  Correct, but indistinguishable from a broken column. Each window now shows a dim `—` until
+  there's real history behind it, then lights up on its own — 1D at day one, 7D at week one,
+  31D at month one — the way the chart pane already says "(not enough data yet)".
+
+  The sorter gotcha resolved cleanly, because the render path and the sort path were *already*
+  separate: `_chgNd` / `chg_pct` keep their float contract and every sorter (movers, the `o`
+  toggle, the ticker arrow) still calls them, so on day zero they rank by change-since-open —
+  a genuinely useful ordering we did not want to blank. Display goes through the new
+  `_chg_col` / `chg_col`, which return `None` until `_has_window` / `has_window` says the
+  lookback is real, and a shared `_pct_cell` renders `None` as the dash. Since movers is ranked
+  by a column that reads `—` on a young world, its header hint switches from `1D %` to
+  `since open` so the ordering still explains itself. A test drives `chg_col` into the sorter
+  and asserts it explodes — the trap is now guarded, not just avoided.
+- [x] **P19 · Ticker precision** (XS) — the tape hardcoded `f"{price:,.2f}"`, so every sub-cent coin
+  read `FRG 0.00` while the board right below showed `$0.0000001834`. Swapped both call sites
+  (`_build_ticker` in `tui.py`, `ticker_text` in `gui/model.py`) to `fmt.money()`, which keeps
+  ~4 significant figures under a cent and was already imported at both.
+
+- [x] **P21 · Ticker timer survives teardown** (XS) — found by a one-in-a-few-runs red suite while
+  shipping P18. The 0.3 s interval can fire once *after* the app is torn down (quit, or a test
+  pilot exiting); `#ticker` is gone by then and `screen_stack` is back to 1, so the modal guard
+  in `_on_timer` didn't cover it and `_tick_ticker` raised `NoMatches`. One line: bail out when
+  `self.is_running` is false. Deterministically reproducible — exit a pilot, then call
+  `_on_timer()` — which is exactly what the test does. (P20 stays reserved for achievements.)
 
 **Dependencies:** P1 → {P5, P6, P12, P14} · P2 → P14 · P7 → {P8, P9}. Everything else can jump
 the queue. If the pass drags, cut P11 and the scanlines first. **Parked:** achievements (becomes

@@ -1871,3 +1871,136 @@ cold: `gui/model.py` binds the palette as module-level names at import time and 
 those into stylesheet strings when widgets are built, so rebinding later does nothing — the work is
 routing the palette through a mutable theme object and restyling live widgets. The
 accent-vs-P&L-semantics split must survive it.
+
+---
+
+## 2026-08-09 — P19, P18, and a flake that turned out to be real (P21)
+
+Picked up cold: working tree clean at `3a54dd3`, 175 green, nothing half-finished. Matthew chose
+the two small screenshot nits before starting P2, which turned out to be the right call — one of
+them shook a latent bug out of the suite.
+
+### P19 · Ticker precision (XS)
+
+Exactly the one-line swap it was filed as. `_build_ticker` (`tui.py`) and `ticker_text`
+(`gui/model.py`) both built their segment with `f"{price:,.2f}"`, so every penny coin scrolled
+past as `FRG 0.00` while the board two rows below showed `$0.0000001834`. Both now call
+`fmt.money()`, which keeps ~4 significant figures under a cent and was already imported at both
+sites. The tape gains a `$` in the process, which matches the Price column beside it.
+
+**Tests** (+1, plus an assertion inside the existing TUI feature scenario): pick the cheapest
+asset on the tape, assert its rendered segment equals `money(price)` and that the literal
+`SYM 0.00` is gone. Mutation-checked both: put `:,.2f` back and both fail, with the failure
+message printing the actual tape (`MEMZ 0.00`) — which is a nice error to read.
+
+### P18 · Honest change columns (S)
+
+The filed gotcha — "mind the sorters" — dissolved once I traced the call graph, because the
+render path and the sort path were **already separate**. Every sorter (`_movers` / `movers_ids`,
+the `o` toggle's `by_change`, both tickers' arrows) calls `_chgNd` / `chg_pct` directly; only
+`_add_row` / `row_ctx` feed the columns. So the change is surgical rather than invasive:
+
+* `_chgNd` / `chg_pct` keep their float contract, and their docstrings now say *why* — on a young
+  world the clamp gives change-since-open, which is a genuinely useful ordering. Blanking it would
+  have made the movers view useless on day zero.
+* New `_has_window` / `has_window` (is the world at least `n` days old?) and `_chg_col` /
+  `chg_col` (the number, or `None`). `_RowCtx.chg*` is now `float | None`.
+* A shared `_pct_cell` in each front-end renders `None` as a dim `—` and otherwise as the signed
+  percentage, replacing three near-identical lambdas in `BOARD_COLUMNS` and three branches in
+  `cell()`. Net: the change columns got *shorter*.
+
+The one consequence worth naming: movers ranks by a column that reads `—` on a young world, which
+would look like a board ordered by nothing. So the movers header hint switches from `1D %` to
+`since open` until the world is a day old. The columns then light up one at a time as the world
+ages — 1D at day one, 7D at week one, 31D at month one — which reads as a system doing its job
+rather than a system that's broken.
+
+**Tests** (+7): a new `tests/test_tui_change_columns.py` drives three worlds through the pilot
+(31 minutes → all three dashes and the `since open` hint; 2 days → 1D real, 7D/31D dashes;
+40 days → all three real *and mutually distinct*, which was the original complaint), plus the pure
+GUI equivalents in `test_gui_model.py`. Three mutations, three catches — the third being the
+interesting one: deliberately route `chg_col` into the sorters and the suite dies with
+`TypeError: '<' not supported between instances of 'NoneType' and 'NoneType'`. The trap named in
+the design note is now guarded, not merely avoided.
+
+### P21 · Ticker timer survives teardown (XS, unplanned)
+
+The first full-suite run after P18 came back **1 failed, 175 passed** —
+`test_dialog_dismiss_is_independent_of_button_count[1]`, `NoMatches` on `#ticker` inside
+`_tick_ticker`. Three re-runs of that file passed, three full runs of a *pristine* copy passed,
+three full runs of the modified tree passed. Textbook shrug-and-move-on. It reproduced
+deterministically instead:
+
+```python
+async with app.run_test(...) as pilot:
+    await pilot.pause()
+app._on_timer()          # NoMatches — the app is gone, the interval isn't
+```
+
+The 0.3 s interval can fire once after teardown. `_on_timer`'s existing guard only covers "a modal
+owns the screen" (`screen_stack > 1`), and by teardown the stack is back to 1 while the widgets
+are already unmounted. One line — `if not self.is_running: return` — and the race is gone. Filed
+as P21 because P20 is still reserved for achievements.
+
+Worth recording as a habit: **an intermittent red suite is a bug report.** Re-run three times
+against a pristine tree before believing it's noise, then try to make it deterministic.
+
+### State
+
+**183 tests pass** (was 175), three consecutive clean full runs. Written back to disk uncommitted,
+with the three commit commands in `TODO.md` ready to paste. Screenshots of the young and aged
+worlds (`tui_p18_young.png` / `tui_p18_old.png`) went to Matthew for the visual check. Next is
+**P2**, live accent repaint.
+
+---
+
+## 2026-08-09 (cont.) — P2 · live accent repaint
+
+Wave A's second slice, and the one with a real design decision in it. The filed blocker was
+accurate: `gui/model.py` did `ACCENT, ACCENT_HI, SELECTION = accent_palette(_saved_accent())` at
+import, and `gui/app.py` interpolated those names into ~25 stylesheet strings as its widgets were
+built. Rebinding the module attribute later was a no-op — the characters were already in the
+strings — so the picker could only write `settings.json` and pop a "restart to apply" box.
+
+**The shape of the fix.** A `Theme` class holding `accent` / `accent_hi` / `selection`, one
+module-level instance `THEME` seeded from the saved accent, and `THEME.set(hex_or_None)` to
+re-derive all three. Every f-string became `{THEME.accent}`, which reads the attribute at *format*
+time. The three module constants are **deleted**, not aliased — a stale copy is precisely the bug,
+so leaving a compatibility alias would have left the trap armed. `test_no_stale_palette_constants_remain`
+asserts `gui.model` has no `ACCENT` / `ACCENT_HI` / `SELECTION` attribute, with a message
+explaining why, so a future "convenience" alias fails loudly instead of quietly re-breaking it.
+
+**Making the repaint reach everything.** Reading THEME late is necessary but not sufficient — a
+stylesheet set once at construction still holds old text. So every accent-baked style on a
+*long-lived* widget moved out of `_build_ui` into two idempotent passes:
+
+* `_apply_theme()` (already existed) — the window stylesheet: buttons, menu bar, menus, table
+  `selection-background-color`, header sections.
+* `_style_panels()` (new) — the two pyqtgraph charts (border stylesheet **and** the left axis pen,
+  which is a Qt pen, not CSS), the news list, and the command line.
+
+`_restyle_theme()` runs both and regenerates the two accent-coloured HTML labels (the TRADER PRO
+banner via `header_html`, the resting-order badge in the positions summary). `set_accent()` =
+`THEME.set(...)` + `_restyle_theme()`, and the two menu actions call it after persisting. The
+construction sites now carry a one-line pointer (`# accent border: _style_panels()`) so nobody
+re-inlines a stylesheet there.
+
+**Modal dialogs needed nothing** — they read THEME in `__init__` and are constructed fresh on every
+open, so they were already correct once the reads were late. Worth stating explicitly because it
+looked like six more call sites at first glance; the test opens a `HelpDialog` *after* the change
+and asserts it's born blue, which pins that reasoning rather than leaving it as a comment.
+
+**Tests** — new `tests/test_gui_theme.py` (+3). The centrepiece drives an already-built window
+through green → blue → reset in a subprocess and checks six surfaces (window, news, command line,
+both charts, header HTML) each gained the new accent *and* lost the old one, that the axis pens
+followed via `pen().color().name()`, and that reset is byte-identical to boot. Plus a pure `Theme`
+unit test and the no-stale-constants guard. Three mutations, three catches: drop the restyle call
+(the old world — fails), make `_style_panels` run only once (fails), re-add the module constants
+(fails). P&L semantics get their own assertions: `GREEN`/`GREEN_HI`/`RED` unchanged and a
+profit/loss cell still green/red under a blue theme.
+
+**186 tests pass**, three consecutive clean full runs. README's Appearance sentence updated —
+"applied next launch" became "applied the instant you pick it".
+
+**P14** (theme presets + CRT scanlines) is now unblocked: presets are just named arguments to
+`set_accent`.

@@ -68,10 +68,41 @@ def _saved_accent() -> str | None:
         return None
 
 
-# Theme accent — the app's chrome (panel/dialog borders, menu highlights, command line, the
-# TRADER PRO banner, board row selection). Defaults to phosphor green; user-themeable via the
-# Appearance menu (see gui/settings.py). Resolved once at import, so it applies on the next launch.
-ACCENT, ACCENT_HI, SELECTION = accent_palette(_saved_accent())
+class Theme:
+    """The accent-derived chrome colours, in one **mutable** object.
+
+    These were three module-level constants resolved at import time, which is precisely why the
+    accent picker could only say "restart to apply": every stylesheet string in ``app.py`` baked
+    the value in when its widget was built, so rebinding a module attribute afterwards changed
+    nothing. Reading ``THEME.accent`` at *format* time is what makes a live repaint possible —
+    the picker mutates this object and asks the window to restyle (``TraderGUI._restyle_theme``).
+
+    Only **chrome** lives here (borders, menu highlights, the banner, row selection).
+    ``GREEN`` / ``GREEN_HI`` / ``RED`` are P&L *semantics* — profit green, loss red, in every
+    theme — and stay module constants on purpose.
+    """
+
+    __slots__ = ("accent", "accent_hi", "selection")
+
+    def __init__(self, accent: str | None = None) -> None:
+        self.set(accent)
+
+    def set(self, accent: str | None) -> None:
+        """Point the theme at a new accent. ``None`` restores the default phosphor green."""
+        self.accent, self.accent_hi, self.selection = accent_palette(accent)
+
+    def as_tuple(self) -> tuple[str, str, str]:
+        """``(accent, accent_hi, selection)`` — handy for tests and for snapshotting."""
+        return self.accent, self.accent_hi, self.selection
+
+    def __repr__(self) -> str:                     # pragma: no cover — debugging aid
+        return f"Theme(accent={self.accent!r}, accent_hi={self.accent_hi!r}, selection={self.selection!r})"
+
+
+# The live theme. Seeded from the saved accent at import; mutated in place by the Appearance
+# menu. There are deliberately no ACCENT / ACCENT_HI / SELECTION module constants any more —
+# a stale copy of these values is the bug this object exists to prevent.
+THEME = Theme(_saved_accent())
 
 
 def steps_for(elapsed: float, ticks_per_sec: float, accum: float) -> tuple[int, float]:
@@ -121,7 +152,7 @@ def header_html(world: World) -> str:
     sp = "&nbsp;&nbsp;&nbsp;"
 
     line1 = (
-        _span("TRADER PRO", ACCENT_HI, bold=True) + "&nbsp;&nbsp;"
+        _span("TRADER PRO", THEME.accent_hi, bold=True) + "&nbsp;&nbsp;"
         + _span(f"seed {w.config.world_seed} · {w.config.profile} · "
                 f"{fmt_clock(w.market.tick_index)}", DIM)
     )
@@ -173,11 +204,28 @@ BOARD_COLUMNS = [
 
 
 def chg_pct(world, engine, aid: str, num_days: int) -> float:
-    """N-day % change — price now vs `num_days` ago. Mirrors the TUI's _chgNd (tui.py:715)."""
+    """N-day % change — price now vs `num_days` ago. Mirrors the TUI's _chgNd (tui.py:715).
+
+    Always a number: on a world younger than the window the lookback clamps to tick 0, giving
+    "change since the world opened". That is the right value to *order* by (movers, sort-by-%,
+    the ticker arrow), so every sorter calls this. Display columns use :func:`chg_col`."""
     t = world.market.tick_index
     price = world.price(aid)
     prev = engine.price_at(aid, max(0, t - num_days * DAY))
     return (price / prev - 1) * 100 if prev > 0 else 0.0
+
+
+def has_window(world, num_days: int) -> bool:
+    """True once the world is old enough for an honest `num_days`-day lookback."""
+    return world.market.tick_index >= num_days * DAY
+
+
+def chg_col(world, engine, aid: str, num_days: int) -> float | None:
+    """The *display* value for a change column: ``None`` until a full window exists.
+
+    Without this, a 31-minute-old world shows the identical number in 1D / 7D / 31D — correct
+    (they all clamp to tick 0) but indistinguishable from a broken column."""
+    return chg_pct(world, engine, aid, num_days) if has_window(world, num_days) else None
 
 
 def row_ctx(world, engine, aid: str) -> RowCtx:
@@ -191,11 +239,19 @@ def row_ctx(world, engine, aid: str) -> RowCtx:
     pnl = (price - cost) / cost * 100 * (1.0 if qty >= 0 else -1.0) if (qty and cost) else 0.0
     return RowCtx(
         aid.split(":", 1)[1], price,
-        chg_pct(world, engine, aid, 1),
-        chg_pct(world, engine, aid, 7),
-        chg_pct(world, engine, aid, 31),
+        chg_col(world, engine, aid, 1),
+        chg_col(world, engine, aid, 7),
+        chg_col(world, engine, aid, 31),
         qty, qty * price, cost, pnl,
     )
+
+
+def _pct_cell(v: float | None) -> Cell:
+    """One change-column cell. ``None`` (see :func:`chg_col`) renders as a dim em dash — the
+    world isn't old enough for that lookback yet. Mirrors the TUI's _pct_cell."""
+    if v is None:
+        return Cell("—", DIM, True, False)
+    return Cell(f"{v:+.2f}%", GREEN if v >= 0 else RED, True, False)
 
 
 def cell(ctx: RowCtx, col_id: str) -> Cell:
@@ -206,11 +262,11 @@ def cell(ctx: RowCtx, col_id: str) -> Cell:
     if col_id == "price":
         return Cell(money(ctx.price), FG, True, False)
     if col_id == "chg":
-        return Cell(f"{ctx.chg:+.2f}%", GREEN if ctx.chg >= 0 else RED, True, False)
+        return _pct_cell(ctx.chg)
     if col_id == "chg7d":
-        return Cell(f"{ctx.chg7d:+.2f}%", GREEN if ctx.chg7d >= 0 else RED, True, False)
+        return _pct_cell(ctx.chg7d)
     if col_id == "chg31d":
-        return Cell(f"{ctx.chg31d:+.2f}%", GREEN if ctx.chg31d >= 0 else RED, True, False)
+        return _pct_cell(ctx.chg31d)
     if col_id == "pos":
         color = AMBER if ctx.qty < 0 else (FG if ctx.qty else DIM)
         return Cell(fmt_qty(ctx.qty) if ctx.qty else "·", color, True, False)
@@ -438,7 +494,8 @@ def ticker_text(world, engine, watch) -> str:
         if not world.has_asset(aid):
             continue
         chg = chg_pct(world, engine, aid, 1)
-        segs.append(f"{aid.split(':', 1)[1]} {world.price(aid):,.2f} "
+        # money() (not `:,.2f`) so sub-cent coins keep ~4 significant figures — see tui._build_ticker.
+        segs.append(f"{aid.split(':', 1)[1]} {money(world.price(aid))} "
                     f"{'▲' if chg >= 0 else '▼'}{abs(chg):.1f}%")
     return "        ".join(segs) + "        " if segs else ""
 
