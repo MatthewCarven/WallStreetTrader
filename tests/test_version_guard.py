@@ -40,6 +40,19 @@ def test_run_tui_refuses_new_textual(monkeypatch, capsys) -> None:
     assert "textual<0.72" in out and "0.99.0" in out
 
 
+def test_run_tui_configures_the_error_log_first(monkeypatch, capsys) -> None:
+    """The TUI was the one front-end that never called setup_logging, so anything it logged went
+    nowhere useful. Since P3's resume path logs an unreadable autosave generation, wire the sink
+    up before anything that can fail — the version guard is a convenient early exit to observe
+    it from, and patching setup_logging keeps the test off the real logs/ directory."""
+    calls = []
+    monkeypatch.setattr(tui, "setup_logging", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(textual, "__version__", "0.99.0")
+    tui.run_tui()
+    capsys.readouterr()
+    assert calls == [{"install_hooks": False}]   # hooks off: they'd fight Textual's own handling
+
+
 if __name__ == "__main__":
     test_guard_accepts_installed_textual()
     print("ok  test_guard_accepts_installed_textual")

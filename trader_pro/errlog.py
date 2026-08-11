@@ -27,6 +27,12 @@ from ._paths import user_data_dir
 
 log = logging.getLogger("trader_pro")
 
+# A library's logger must be inert until an application configures it. Without a handler,
+# `log.error(...)` falls through to logging's *handler of last resort*, which prints the whole
+# report to stderr — and in the TUI that lands on top of a full-screen terminal app, in the exe
+# it pops a console. The NullHandler is what makes "silent" true even before setup_logging().
+log.addHandler(logging.NullHandler())
+
 try:                                       # the vendored handler is stdlib-only; this shouldn't fail
     from . import _errhandler as _eh
 except Exception:                          # ...but if it ever does, degrade instead of hard-failing

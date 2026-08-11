@@ -1,9 +1,14 @@
 """Tests for the silent error-logging shim (trader_pro/errlog.py). No Qt needed."""
 import logging
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from trader_pro import errlog
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _flush():
@@ -64,6 +69,22 @@ def test_setup_logging_is_idempotent(tmp_path):
     errlog.setup_logging(path, install_hooks=False)
     after = len(logging.getLogger("trader_pro").handlers)
     assert before == after                      # no duplicate file handler on the second call
+
+
+def test_log_error_before_setup_logging_stays_off_stderr():
+    """"Silent" has to hold *before* a front-end configures logging too. With no handler on the
+    trader_pro logger, stdlib logging falls back to its handler of last resort and prints the
+    whole report to stderr — which in the TUI paints over a full-screen terminal app. Run in a
+    subprocess so the check is immune to whatever earlier tests did to the logger.
+    """
+    code = (
+        f"import sys; sys.path.insert(0, {str(ROOT)!r})\n"
+        "from trader_pro.errlog import log_error\n"
+        "log_error(ValueError('boom'), 'pre-setup')\n"
+    )
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stderr == "", f"log_error leaked to stderr before setup_logging:\n{r.stderr}"
 
 
 def test_log_error_is_silent_on_broken_exception(tmp_path):
