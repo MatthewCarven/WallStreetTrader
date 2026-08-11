@@ -13,7 +13,7 @@ from ..core import AssetKind, World, load_seed_universe
 from ..core.engine import DAY, HOUR, WEEK
 from ..core.orders import fee_rate
 from ..core.portfolio import MAINTENANCE_MARGIN_RATIO
-from ..persistence import autosave_path, has_autosave, load_game
+from ..persistence import autosave_path, has_autosave, load_autosave
 
 # Live-play speeds as ticks (sim-minutes) advanced per REAL second — mirrors tui.py SPEEDS.
 # Index 0 is a calm 1 sim-minute per real second.
@@ -116,22 +116,28 @@ def steps_for(elapsed: float, ticks_per_sec: float, accum: float) -> tuple[int, 
     return steps, accum - steps
 
 
-def boot() -> tuple[TraderApp, bool]:
+def boot() -> tuple[TraderApp, bool, bool]:
     """Resume the last autosave or start a fresh world — mirrors run_tui() (tui.py:1417).
-    Returns (trader, resumed)."""
+
+    Returns ``(trader, resumed, from_backup)``. `from_backup` is True when the live autosave was
+    unreadable and P3's generation chain rescued the session from `.1` or `.2`, so the window can
+    say so instead of silently handing back a slightly older game.
+    """
     universe = load_seed_universe()
     world = None
     resumed = False
+    from_backup = False
     if has_autosave():
         try:
-            world = load_game(autosave_path(), universe)
+            world, src = load_autosave(universe=universe)
             resumed = True
+            from_backup = src != autosave_path()
         except Exception:
             world = None
     if world is None:
         world = World.new(universe, world_seed=DEFAULT_SEED, profile="Normal",
                           starting_cash=5000.0, fee_level="off")
-    return TraderApp(world, universe=universe), resumed
+    return TraderApp(world, universe=universe), resumed, from_backup
 
 
 def _span(text: str, color: str, *, bold: bool = False) -> str:

@@ -68,7 +68,10 @@ highlighted asset**, your positions, and a scrolling news log.
 
 The game **autosaves** as you play and on quit; relaunching `play_tui.py` **resumes your last
 game** automatically (press `Ctrl+N` for a fresh one). Saves live in `saves/<slot>.world` and are
-written atomically (a crash mid-save can't corrupt a slot).
+written atomically (a crash mid-save can't corrupt a slot). The autosave additionally keeps two
+**backup generations** — `autosave.1.world`, `autosave.2.world` — and resume falls back through
+them if the newest turns out to be unreadable, telling you when it does. They're recovery files,
+not slots, so the `Ctrl+L` browser doesn't list them; deleting the autosave removes all three.
 
 > **Textual version note.** The TUI is pinned to `textual>=0.50,<0.72`. Textual 0.72.0
 > introduced a regression that deadlocks the trade-dialog teardown and freezes the whole

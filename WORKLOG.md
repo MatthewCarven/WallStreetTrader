@@ -2004,3 +2004,91 @@ profit/loss cell still green/red under a blue theme.
 
 **P14** (theme presets + CRT scanlines) is now unblocked: presets are just named arguments to
 `set_accent`.
+
+---
+
+## 2026-08-10 — P3 · autosave generations (Wave A complete)
+
+The last Wave A slice, and the smallest of the three on paper: rotate `autosave` → `.1` → `.2`,
+fall back down the chain when the newest won't load. It came in at about the size expected, but
+the smoke run at the end turned up something the tests couldn't have — see P22 below.
+
+**Why generations at all, when saves are already atomic.** Worth stating, because it looks like
+belt-and-braces on a solved problem. `save_game` writes a temp file and `os.replace`s it, so a
+crash *mid-write* genuinely cannot corrupt a slot. Generations cover the failures atomicity has
+no answer for: a bad sector under the file, a hard power cut before the filesystem journal caught
+up, a save that was already wrong when we serialised it. The autosave fires every 30 s, so the
+chain only spans ~90 seconds — that's not time travel, and it isn't meant to be. It's "you lose
+one autosave interval instead of the session".
+
+**Rotate before the write, not after.** Renames, never copies, so rotating a save costs the same
+whatever it weighs — that's what makes it affordable on the 30-second timer. The order is: drop
+the oldest, move each generation back, then write the new gen 0. That leaves one observable
+window: a crash between the rename and the write leaves `.1` populated and **no gen 0 at all**.
+So `has_autosave()` had to stop asking about the live slot and start asking about the whole chain
+— otherwise the crash that generations exist to survive would present as "no save, here's a fresh
+world", which is exactly the outcome we were trying to prevent. A test pins that case by calling
+`rotate_autosaves()` and simply not writing.
+
+**The oldest is dropped explicitly, and that isn't redundant.** `os.replace(.1, .2)` already
+overwrites `.2`, so deleting it first looks like a no-op — and it is, *while the chain is full*.
+Punch a hole in it (a backup deleted by hand, a rename that failed) and the tail never gets
+overwritten again: a stale generation lives forever and resume can fall all the way back to it.
+`test_rotation_ages_out_a_stale_generation_across_a_hole` builds exactly that hole and asserts the
+ancient save is gone. Without it the explicit `unlink` would have been untested dead-looking code
+that a future cleanup deletes.
+
+**Two decisions about how visible the backups should be.**
+
+* *Hidden from the `Ctrl+L` browser.* `list_saves` globs `*.world`, so untouched it would have
+  shown `autosave.1` and `autosave.2` as pickable slots — three near-identical rows, 30 seconds
+  apart, burying the saves you actually named. They're recovery files. `read_info` still calls a
+  backup an autosave when you ask about one directly, because it is one; it's the *browser* that
+  filters.
+* *Deleting the autosave takes all three.* Otherwise you delete the autosave, relaunch, and
+  resume from `.1` — the slot you just deleted appears to come back. That one is a bug report
+  waiting to happen, so `delete_save` now expands the autosave slot to its whole chain.
+
+**Telling the player.** A silent fallback rewinds you ~30 seconds with no explanation, which is
+the kind of thing that reads as "the game ate my trades". `load_autosave` returns `(world, path)`
+rather than just the world, both resume paths compare it against gen 0, and each front-end says so
+— amber in the TUI news pane, red in the GUI log. `gui.model.boot()` grew a third return value for
+it; the one caller in the tests moved with it. The TUI message started as one long sentence and
+was cut to two short lines after the screenshot showed the news pane clips rather than wraps
+(`tui_p3_backup_resume.png`). The existing "Resumed your last game · …" line clips the same way at
+that width — pre-existing, noted in `TODO.md`, not this slice.
+
+**P22 · the error log was never silent.** The end-to-end smoke run — five autosaves, corrupt gen 0,
+resume — printed the recovery *and* a sixty-line traceback to the terminal. `load_autosave` logs an
+unreadable generation via `errlog.log_error`, and `errlog`'s logger had **no handler** until a
+front-end called `setup_logging()` — at which point stdlib logging falls through to its handler of
+last resort and prints to stderr. Worse, `run_tui()` was the one entry point that never called
+`setup_logging()` (the CLI and GUI both do), so the TUI would have taken that traceback across a
+full-screen terminal app, and its errors had been going nowhere all along. Two lines fix both: a
+`logging.NullHandler()` on the logger at import — the stdlib library pattern, which makes "silent"
+true *before* anyone configures anything — and `setup_logging(install_hooks=False)` at the top of
+`run_tui()`. Tested in a subprocess so the check can't be fooled by whatever earlier tests did to
+the logger. This is the P3 lesson: the unit tests were green and the *behaviour* was still wrong,
+because nothing in the suite was watching stderr.
+
+### Tests
+
+**201 pass** (was 186), three consecutive clean full runs. Fifteen new: ten on the generation chain
+in `test_persistence.py` (rotation order, the cap dropping the oldest, the hole, corrupt-newest,
+two-corrupt, a dead chain raising, backup-only `has_autosave`, browser filtering, cascading delete,
+the `gen` range guard), two front-end ones in `test_tui_persistence.py` (the TUI's autosave really
+goes through the rotation; the backup banner reaches the news pane), one boot-wiring test in
+`test_gui_model.py` (`from_backup` is a *comparison* and would read False silently if it pointed at
+the wrong path — so all three outcomes are asserted, including a dead chain giving a fresh world),
+plus the two P22 ones.
+
+Thirteen mutations, thirteen catches: rotation no-op'd · oldest kept · resume stopping at gen 0 ·
+`has_autosave` back to the live slot only · browser filter removed · `read_info` back to
+`name == AUTOSAVE_SLOT` · delete narrowed to one file · range guard removed · the TUI writing gen 0
+directly (the pre-P3 line) · the TUI banner suppressed · `boot()` hardcoding `from_backup=False` ·
+the `NullHandler` removed · `setup_logging` dropped from `run_tui()`.
+
+### State
+
+Wave A is done — P1, P2, P3 all shipped. Next is **Wave B (feel)**: P4 price-flash, P5 sound
+(PySynthRack for the synthesis), P6 tray + toasts. **P14** has been unblocked since P2.

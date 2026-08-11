@@ -1,4 +1,6 @@
 """Pure unit tests for the GUI's Qt-free helpers (no PySide6 needed)."""
+from pathlib import Path
+
 from trader_pro.cli import TraderApp
 from trader_pro.core import AssetKind, World, load_seed_universe
 from trader_pro.gui.model import (
@@ -36,9 +38,36 @@ def test_header_html_has_key_fields():
 
 
 def test_boot_returns_a_trader():
-    trader, resumed = boot()
+    trader, resumed, from_backup = boot()          # 3-tuple since P3 (autosave generations)
     assert trader.world is not None
     assert isinstance(resumed, bool)
+    assert isinstance(from_backup, bool)
+    assert not (from_backup and not resumed)       # a backup resume is still a resume
+
+
+def test_boot_reports_a_backup_resume(monkeypatch):
+    """boot()'s third value is the only thing that tells the player their game rewound, and it
+    is a *comparison* — it silently reads False if the wiring points at the wrong path."""
+    import trader_pro.gui.model as M
+
+    uni = load_seed_universe()
+    world = World.new(uni, world_seed=1, profile="Normal", starting_cash=5000.0)
+    live, backup = Path("/saves/autosave.world"), Path("/saves/autosave.1.world")
+    monkeypatch.setattr(M, "has_autosave", lambda *a, **k: True)
+    monkeypatch.setattr(M, "autosave_path", lambda *a, **k: live)
+
+    monkeypatch.setattr(M, "load_autosave", lambda *a, **k: (world, live))
+    assert M.boot()[1:] == (True, False)                # resumed from the live slot
+
+    monkeypatch.setattr(M, "load_autosave", lambda *a, **k: (world, backup))
+    assert M.boot()[1:] == (True, True)                 # ...and from a generation behind it
+
+    def _dead(*a, **k):
+        raise FileNotFoundError("no readable autosave")
+    monkeypatch.setattr(M, "load_autosave", _dead)
+    trader, resumed, from_backup = M.boot()
+    assert (resumed, from_backup) == (False, False)     # dead chain -> a fresh world, no warning
+    assert trader.world.market.tick_index == 0
 
 
 def test_board_ids_and_row_ctx_fresh_world():

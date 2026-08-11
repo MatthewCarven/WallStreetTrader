@@ -470,8 +470,14 @@ Sizes: **S** = an evening slice, **M** = a full session.
   work: they read THEME when constructed, and they're constructed each time you open them.
   "Restart to apply" is gone from the picker, the reset action, and the README. `GREEN` /
   `GREEN_HI` / `RED` stayed module constants — P&L semantics are not themeable. Unlocks P14.
-- [ ] **P3 · Autosave generations** (S) — rotate `autosave` → `.1` → `.2`; a corrupt newest
-  falls back down the chain at resume.
+- [x] **P3 · Autosave generations** (S) — every autosave now *rotates* before it writes
+  (`autosave` → `.1` → `.2`, oldest dropped), and resume walks that chain newest-first until a
+  file actually loads, reporting in the news pane when it landed on a backup. Renames, not
+  copies, so the rotation is free on the 30-second timer. `has_autosave` looks at the whole
+  chain, because rotating *before* writing means a crash in that window leaves `.1` and no gen 0
+  — still a resumable game. Backups are hidden from the `Ctrl+L` browser (they'd bury the real
+  slots with three near-identical rows) and deleting the autosave takes all three, or the slot
+  you just deleted would come back at next launch. **Wave A complete.**
 
 **Wave B — feel** *(GUI-first; the TUI gets the terminal bell where it's a one-liner)*
 
@@ -546,6 +552,17 @@ Sizes: **S** = an evening slice, **M** = a full session.
   in `_on_timer` didn't cover it and `_tick_ticker` raised `NoMatches`. One line: bail out when
   `self.is_running` is false. Deterministically reproducible — exit a pilot, then call
   `_on_timer()` — which is exactly what the test does. (P20 stays reserved for achievements.)
+
+- [x] **P22 · The error log was never silent** (XS) — surfaced by P3's smoke run. `errlog.log` had
+  no handler until a front-end called `setup_logging()`, so stdlib logging fell through to its
+  *handler of last resort* and printed the whole report to **stderr** — and `run_tui()` was the
+  one entry point that never called `setup_logging()` at all. P3's resume path is the first thing
+  the TUI logs, so a torn autosave would have dumped a 60-line traceback over a full-screen
+  terminal app. Two lines: a `logging.NullHandler()` on the logger at import (the stdlib library
+  pattern — it makes "silent" true *before* configuration), and `setup_logging(install_hooks=False)`
+  at the top of `run_tui()`, matching the CLI, so TUI errors finally land in `logs/trader_pro.log`.
+  Tested in a subprocess, so the assertion can't be fooled by whatever earlier tests did to the
+  logger.
 
 **Dependencies:** P1 → {P5, P6, P12, P14} · P2 → P14 · P7 → {P8, P9}. Everything else can jump
 the queue. If the pass drags, cut P11 and the scanlines first. **Parked:** achievements (becomes

@@ -116,9 +116,65 @@ def test_tui_resume() -> None:
     asyncio.run(_resume_scenario(Path(tempfile.mkdtemp())))
 
 
+# ---- P3: autosave generations, from the front-end's side ---- #
+
+async def _generations_scenario(tmp: Path) -> None:
+    """The TUI's autosave must go *through* the rotation, not straight at gen 0 — otherwise the
+    generations exist in persistence.py and never get written by the thing that autosaves."""
+    app = _app(tmp)
+    async with app.run_test(size=(120, 40)) as pilot:
+        for _ in range(3):
+            app.action_day()
+            await pilot.pause()
+            app._autosave()
+        assert P.autosave_path(tmp, 1).exists() and P.autosave_path(tmp, 2).exists()
+        ticks = [P.read_info(p).tick for p in P.autosave_paths(tmp)]
+        assert ticks == [3 * 1440, 2 * 1440, 1440]      # newest first, one day apart
+
+
+def test_tui_autosave_writes_generations() -> None:
+    asyncio.run(_generations_scenario(Path(tempfile.mkdtemp())))
+
+
+async def _backup_resume_scenario(tmp: Path) -> None:
+    """A torn gen 0 rewinds the player ~30 s; on_mount has to say so rather than let them
+    wonder why their last few trades vanished."""
+    seed = _app(tmp)
+    seed.trader._advance(1440)
+    P.save_autosave(seed.trader.world, tmp)             # becomes .1
+    seed.trader._advance(1440)
+    P.save_autosave(seed.trader.world, tmp)             # gen 0
+    P.autosave_path(tmp).write_text("{ torn write")
+
+    world, src = P.load_autosave(tmp, U)
+    assert src == P.autosave_path(tmp, 1)
+
+    app = TraderTUI(TraderApp(world, universe=U))
+    app.saves_dir = tmp
+    app.resumed = True
+    app.resumed_from_backup = True
+    logged: list[str] = []
+    real_log = app._log
+    app._log = lambda text: (logged.append(str(text)), real_log(text))[1]   # tap the news pane
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert app.trader.world.market.tick_index == 1440        # the older generation
+        assert any("unreadable" in line for line in logged), logged
+        assert any("backup" in line for line in logged), logged
+
+
+def test_tui_resume_from_backup_warns() -> None:
+    asyncio.run(_backup_resume_scenario(Path(tempfile.mkdtemp())))
+
+
 if __name__ == "__main__":
     test_tui_persistence()
     print("ok  test_tui_persistence")
     test_tui_resume()
     print("ok  test_tui_resume")
+    test_tui_autosave_writes_generations()
+    print("ok  test_tui_autosave_writes_generations")
+    test_tui_resume_from_backup_warns()
+    print("ok  test_tui_resume_from_backup_warns")
     print("all tui-persistence tests passed")

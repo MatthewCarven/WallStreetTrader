@@ -31,9 +31,10 @@ from .core import (
 )
 from .core.engine import DAY, HOUR, WEEK
 from .core.orders import fee_rate
+from .errlog import setup_logging
 from .persistence import (
     SAVES_DIR, save_game, load_game, list_saves, delete_save, slot_path,
-    autosave_path, has_autosave, AUTOSAVE_SLOT,
+    autosave_path, has_autosave, save_autosave, load_autosave, AUTOSAVE_SLOT,
 )
 
 # Live-play speeds as ticks (sim-minutes) advanced per REAL second. `_on_timer` accumulates
@@ -825,6 +826,7 @@ class TraderTUI(App):
         self.saves_dir = SAVES_DIR
         self.autosave_enabled = True
         self.resumed = False                  # set by run_tui when launched from an autosave
+        self.resumed_from_backup = False      # ...and True when the live slot was unreadable (P3)
         self._last_autosave = 0.0
         self._play_clock: float | None = None   # monotonic ts of the last live-play advance; None while
         self._tick_accum = 0.0                  # paused/modal-open. accum carries fractional ticks/sec.
@@ -877,6 +879,10 @@ class TraderTUI(App):
             self._log(Text(f"▶ Resumed your last game · {fmt_clock(w.market.tick_index)} · "
                            f"net worth {money(nw)} ({ret:+.1f}%)   (Ctrl+N for a new world)",
                            style="bold cyan"))
+            if self.resumed_from_backup:
+                # two short lines: the news pane is narrow and clips rather than wraps
+                self._log(Text("⚠ newest autosave was unreadable", style="bold yellow"))
+                self._log(Text("   resumed from a backup instead", style="bold yellow"))
         self._refresh()
 
     # ---- live clock ---- #
@@ -1282,7 +1288,7 @@ class TraderTUI(App):
         if not self.autosave_enabled:
             return
         try:
-            save_game(self.trader.world, autosave_path(self.saves_dir), label=AUTOSAVE_SLOT)
+            save_autosave(self.trader.world, self.saves_dir)   # rotates .1/.2 first (P3)
         except Exception:
             pass
 
@@ -1773,6 +1779,7 @@ def textual_version_ok() -> tuple[bool, str]:
 
 
 def run_tui() -> None:
+    setup_logging(install_hooks=False)      # same sink as the CLI/GUI; hooks would fight Textual
     ok, ver = textual_version_ok()
     if not ok:
         print(
@@ -1789,10 +1796,12 @@ def run_tui() -> None:
     universe = load_seed_universe()
     world = None
     resumed = False
+    from_backup = False
     if has_autosave():
         try:
-            world = load_game(autosave_path(), universe)
+            world, src = load_autosave(universe=universe)      # walks .1/.2 if gen 0 is bad (P3)
             resumed = True
+            from_backup = src != autosave_path()
         except Exception:
             world = None
     if world is None:
@@ -1801,6 +1810,7 @@ def run_tui() -> None:
     trader = TraderApp(world, universe=universe)
     app = TraderTUI(trader)
     app.resumed = resumed
+    app.resumed_from_backup = from_backup
     app.run()
 
 

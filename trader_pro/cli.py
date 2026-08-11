@@ -27,7 +27,7 @@ from .core.engine import DAY, HOUR
 from .errlog import log_error, setup_logging
 from .fmt import money, fmt_qty
 from .persistence import (
-    SAVES_DIR, AUTOSAVE_SLOT, save_game, load_game, slot_path, autosave_path, list_saves,
+    SAVES_DIR, AUTOSAVE_SLOT, save_game, save_autosave, load_game, slot_path, list_saves,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -744,7 +744,7 @@ class TraderApp:
         # snapshot the current game before we replace it, so a mistyped load is recoverable
         if name != AUTOSAVE_SLOT:
             try:
-                save_game(self.world, autosave_path(SAVES_DIR), label="autosave")
+                save_autosave(self.world, SAVES_DIR)
             except Exception as exc:
                 log_error(exc, "autosave before load")
         try:
@@ -840,7 +840,7 @@ def repl() -> None:
     # front-end resumes right where this game left off.
     if _session_fingerprint(app) != start_fp:
         try:
-            save_game(app.world, autosave_path(SAVES_DIR), label="autosave")
+            save_autosave(app.world, SAVES_DIR)
             print(col("  · autosaved → autosave.world", C.DIM))
         except Exception as exc:
             log_error(exc, "autosave on quit")

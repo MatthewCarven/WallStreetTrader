@@ -34,8 +34,7 @@ from ..core import (
 from ..core.engine import DAY, HOUR
 from ..core.orders import FEE_LEVELS
 from ..persistence import (
-    AUTOSAVE_SLOT, SAVES_DIR, autosave_path, delete_save, list_saves, load_game, save_game,
-    slot_path,
+    SAVES_DIR, delete_save, list_saves, load_game, save_autosave, save_game, slot_path,
 )
 from .settings import clear_accent_color, get_setting, set_accent_color, update_settings
 from .model import (
@@ -700,10 +699,11 @@ class TraderGUI(QMainWindow):
     positions, news & ticker. Holds a `TraderApp` and advances it on a QTimer, exactly as the
     TUI's `TraderTUI` does with `set_interval`/`_on_timer`."""
 
-    def __init__(self, trader: TraderApp, resumed: bool = False):
+    def __init__(self, trader: TraderApp, resumed: bool = False, from_backup: bool = False):
         super().__init__()
         self.trader = trader
         self.resumed = resumed
+        self.resumed_from_backup = from_backup   # live autosave was unreadable; .1/.2 saved us (P3)
         self.playing = False
         self.speed_idx = 0                      # default: 1 sim-minute per real second
         self.autosave_enabled = True
@@ -1048,6 +1048,8 @@ class TraderGUI(QMainWindow):
         self._log_line("Welcome to TRADER PRO — the market ticks live; news lands here.", GREEN_HI)
         if self.resumed:
             self._log_line("Resumed your last game.  (Ctrl+N starts a new world)", AMBER)
+            if self.resumed_from_backup:
+                self._log_line("Newest autosave was unreadable — recovered from a backup.", RED)
 
         self.setCentralWidget(central)
         self._apply_theme()
@@ -1627,7 +1629,7 @@ class TraderGUI(QMainWindow):
 
     def _autosave(self) -> None:
         try:
-            save_game(self.trader.world, autosave_path(), label=AUTOSAVE_SLOT)
+            save_autosave(self.trader.world, self.saves_dir)   # rotates .1/.2 first (P3)
         except Exception:
             pass                                # autosave is best-effort, exactly like the TUI
 
@@ -1690,8 +1692,8 @@ class TraderGUI(QMainWindow):
 def run_gui() -> None:
     """Boot a world (resume last autosave or start fresh) and open the window — mirrors run_tui()."""
     setup_logging()                             # silent error log + global uncaught-exception hooks
-    trader, resumed = boot()
+    trader, resumed, from_backup = boot()
     app = QApplication.instance() or QApplication(sys.argv)
-    window = TraderGUI(trader, resumed=resumed)
+    window = TraderGUI(trader, resumed=resumed, from_backup=from_backup)
     window.show()
     app.exec()
