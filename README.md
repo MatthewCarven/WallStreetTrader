@@ -96,7 +96,9 @@ ticker + top-movers, a save/load browser and a new-world dialog (**Game** menu �
 `Ctrl+L`), a predictions dialog, a fees menu, an **Appearance** menu with an accent-colour picker
 (applied the instant you pick it — panels, menus, chart frames and row highlights recolour live,
 while profit/loss and the rising/falling chart lines stay green/red — and saved beside your games
-for next launch), and a `:` command line that runs every
+for next launch) **and a price-flash toggle** (board prices pulse green on an up-tick, red on a
+down-tick, and fade out over ~0.7s; on by default, remembered like the accent), and a `:` command
+line that runs every
 CLI command. The window also **remembers your session**: size & position, board view + sort, chart
 range and speed are saved on close (to the same `settings.json` as the accent) and restored next
 launch. The keys match the TUI table above; **`Enter` or double-click** a row to trade, `?` for

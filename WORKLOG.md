@@ -2092,3 +2092,83 @@ the `NullHandler` removed · `setup_logging` dropped from `run_tui()`.
 
 Wave A is done — P1, P2, P3 all shipped. Next is **Wave B (feel)**: P4 price-flash, P5 sound
 (PySynthRack for the synthesis), P6 tray + toasts. **P14** has been unblocked since P2.
+
+## 2026-08-23 — P4 · price flash on the board (Wave B opens)
+
+First slice of Wave B, and the one that sets the tone for it: nothing about the simulation
+changes, the board just tells you *what it did* instead of only *where it landed*. A Price cell
+tints green when it ticks up, red when it ticks down, and fades out over 0.7 seconds.
+
+**The interesting decision is what a flash means.** Not "this price differs from the last one the
+engine produced" — "this price moved **on your screen**". `PriceFlash` therefore remembers the
+last price it was *shown*, not the market's history, and an asset it has never seen cannot flash
+at all. That one rule buys every quiet case for free: switching views, paging, sorting, and
+opening a loaded world are all dark, because `update()` drops any asset absent from the batch it
+was handed, so an asset you page back to is unknown again and its first sighting only re-seeds
+the baseline. The alternative — comparing against the market — would light the entire board every
+time you touched a view button, and a flash that fires when nothing happened is worse than no
+flash at all. `_after_world_swap` clears explicitly on top of that, since the swapped-in world
+has the *same* asset ids at completely different prices.
+
+**Fading onto the right colour.** The board alternates row backgrounds (`BG` on even rows,
+`PANEL` on odd), so a flash that faded toward one flat colour would snap at the tail on half the
+rows. `row_background(row)` gives the tint its true endpoint, and the blend peaks at
+`FLASH_PEAK = 0.55` rather than the full colour — a saturated cell drowns the pale phosphor
+digits for a third of a second, which is precisely the third of a second you wanted to read them
+in. Green up / red down are the module constants, never `THEME.accent`: the P2 split, applied
+without having to think about it.
+
+**It needed its own timer, and that's the non-obvious part.** The market `QTimer` runs at 250 ms
+but only repaints when a whole sim-minute has elapsed, and stops advancing entirely while paused
+— so a fade driven by it would step three times at 1 min/s, and after a manual `Step` or a pause
+it would simply freeze mid-glow, leaving half the board tinted until you pressed something. The
+flash gets a 60 ms timer of its own whose slot costs one dict scan (`flash.live()`) when nothing
+is flashing, and repaints only the Price column when something is. Alpha is a function of
+wall-clock, not of frames drawn, so a GC pause or a modal held open can't strand a flash either.
+That is also what makes the whole thing testable without an event loop: every method takes `now`.
+
+**The toggle clears on both edges.** `Appearance ▸ Price flash` applies live and persists like the
+accent does. Turning it *off* clearing the tracker is obvious; turning it back *on* clearing it
+matters just as much, or the first repaint would compare live prices against a baseline from
+whenever you switched it off and light up the entire board at once.
+
+**Known cosmetic limit:** Qt's default delegate paints the selection highlight *over* the
+background role, so the cursor row's flash is invisible while it's selected. Fighting that means
+a custom delegate for one row; not worth it, and the row you're looking at is the one you're
+least likely to need the hint on.
+
+### Tests
+
+**215 pass** (was 201), two consecutive clean full runs. Fourteen new in `tests/test_gui_flash.py`
+— thirteen pure ones (no Qt, no clock: interpolation endpoints and clamping, the alternating base,
+first-sighting silence, direction, an unchanged price staying silent, linear decay floored at
+zero, a second move restarting the fade, tint blending toward the P&L semantics, the peak stopping
+short of the full colour, paging back staying quiet, pruning both expired and departed hits,
+`clear()` dropping the baseline too, and a zero duration not dividing by zero) plus one subprocess
+test that drives a real window through the whole feature: only the Price column paints, the tint
+reads as its direction, a blue accent still flashes green and red, the fade completes on
+wall-clock with the market paused, the flash timer is faster than the market timer, world swaps
+and view changes stay dark, the toggle darkens / persists / doesn't replay a backlog, and a
+`price_flash: false` in settings survives to the next launch's menu checkmark.
+
+**Twenty mutations, twenty catches** — but only after a fix. The first sweep *missed* one:
+deleting the `flash_on` check from the painter changed nothing, because `set_price_flash` also
+clears the tracker and `_recompute` doesn't feed it while off, so its two neighbours were covering
+it. Rather than delete the guard (it's what makes the flag authoritative for the painter, whatever
+state the tracker is in) the test now pokes `flash_on` directly on a live flash — the same call
+the boot path makes. The others: first-sighting flashing, the baseline never forgetting, no
+pruning, unfloored alpha, a dead flash still painting, a full-saturation peak, flipped row parity,
+up/down swapped, every column tinted, the board never fed, the world swap keeping its baseline,
+the toggle not clearing, not persisting, the preference not restored, the flash timer never
+started, the flash timer running at the market cadence, `repaint_flashes` always claiming work,
+and `refresh()` emitting without the background role.
+
+**And a smoke run, per the P22 lesson.** Four seconds of a real event loop at 1 hr/s (a flash on
+nearly every frame) with stderr captured: 50 flash repaints, 792 lit-cell samples, **stderr
+empty**. Green tests still aren't a smoke test.
+
+### State
+
+Wave B is open. Next is **P5 · sound** — which Matthew wants to talk through before it starts, so
+it is parked, not started. **P6 · tray + toasts** and **P14 · theme presets** are both available
+and independent of that conversation.

@@ -38,12 +38,13 @@ from ..persistence import (
 )
 from .settings import clear_accent_color, get_setting, set_accent_color, update_settings
 from .model import (
-    THEME, AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, GREEN, GREEN_HI,
-    PANEL, POSITION_COLUMNS, RED, SPEEDS, TIMER_MS, asset_detail_html, boot, cell,
+    THEME, AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, FLASH_MS, GREEN,
+    GREEN_HI, PANEL, POSITION_COLUMNS, PRICE_COLUMN, PriceFlash, RED, SPEEDS, TIMER_MS,
+    asset_detail_html, boot, cell,
     closure_entry, default_watchlist, event_entry, fill_entry, header_html, kind_ids,
     margin_call_message, pending_fill_entry,
     margin_color, margin_fill, movers_ids, position_rows, prediction_summary, row_ctx,
-    save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
+    row_background, save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
 )
 from ..errlog import guard, setup_logging
 from ..fmt import abbrev_money, signed_money
@@ -117,7 +118,10 @@ class BoardModel(QAbstractTableModel):
     """Feeds the market board's QTableView from the live world. Columns are BOARD_COLUMNS; each
     cell's text / colour / alignment / weight come from the pure `cell()` helper, so this model
     just maps them onto Qt roles. `refresh()` recomputes the row values in place and repaints
-    without resetting (keeping selection); `set_aids()` swaps the whole list (a reset)."""
+    without resetting (keeping selection); `set_aids()` swaps the whole list (a reset).
+
+    Since P4 it also owns the price flash: `_recompute` feeds every visible price to `PriceFlash`,
+    which answers `Qt.BackgroundRole` for the Price column with a fading green/red tint."""
 
     def __init__(self, trader: TraderApp):
         super().__init__()
@@ -125,6 +129,8 @@ class BoardModel(QAbstractTableModel):
         self.aids: list[str] = []
         self._rows: list = []
         self.sort_active = False          # drives the ▼ glyph on the sorted (1D %) column header
+        self.flash = PriceFlash()         # P4: which rows just ticked, and how bright they still are
+        self.flash_on = True              # Appearance ▸ Price flash (persisted; see _restore_prefs_pre)
 
     def set_aids(self, aids) -> None:
         self.beginResetModel()
@@ -135,6 +141,9 @@ class BoardModel(QAbstractTableModel):
     def _recompute(self) -> None:
         w, eng = self.trader.world, self.trader.engine
         self._rows = [row_ctx(w, eng, aid) for aid in self.aids]
+        if self.flash_on:                 # one feed point covers both refresh() and set_aids()
+            self.flash.update({aid: r.price for aid, r in zip(self.aids, self._rows)},
+                              time.monotonic())
 
     def refresh(self) -> None:
         if not self.aids:
@@ -142,7 +151,19 @@ class BoardModel(QAbstractTableModel):
         self._recompute()
         top = self.index(0, 0)
         bottom = self.index(self.rowCount() - 1, self.columnCount() - 1)
-        self.dataChanged.emit(top, bottom, [Qt.DisplayRole, Qt.ForegroundRole])
+        self.dataChanged.emit(top, bottom, [Qt.DisplayRole, Qt.ForegroundRole, Qt.BackgroundRole])
+
+    def repaint_flashes(self) -> bool:
+        """Repaint just the Price column so live flashes keep fading *between* market ticks.
+
+        Returns False when nothing is flashing — the flash timer's early-out, and the reason a
+        quiet or paused board costs one dict scan every 60 ms rather than a repaint."""
+        if not self.flash_on or not self._rows or not self.flash.live(time.monotonic()):
+            return False
+        self.dataChanged.emit(self.index(0, PRICE_COLUMN),
+                              self.index(self.rowCount() - 1, PRICE_COLUMN),
+                              [Qt.BackgroundRole])
+        return True
 
     def aid_at(self, row: int) -> str | None:
         return self.aids[row] if 0 <= row < len(self.aids) else None
@@ -164,6 +185,12 @@ class BoardModel(QAbstractTableModel):
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
             return None
+        if role == Qt.BackgroundRole:        # P4: the price flash, and nothing else, paints cells
+            if not self.flash_on or BOARD_COLUMNS[index.column()][0] != "price":
+                return None
+            tint = self.flash.tint(self.aids[index.row()], time.monotonic(),
+                                   row_background(index.row()))
+            return QColor(tint) if tint else None
         c = cell(self._rows[index.row()], BOARD_COLUMNS[index.column()][0])
         if role == Qt.DisplayRole:
             return c.text
@@ -707,6 +734,7 @@ class TraderGUI(QMainWindow):
         self.playing = False
         self.speed_idx = 0                      # default: 1 sim-minute per real second
         self.autosave_enabled = True
+        self.price_flash = True                 # P4: board price flash (Appearance ▸, persisted)
         self.slot = None                        # current manual save slot (Ctrl+S default)
         self.saves_dir = SAVES_DIR
         self._play_clock: float | None = None   # monotonic ts of last advance; None while paused
@@ -748,6 +776,14 @@ class TraderGUI(QMainWindow):
         self._timer.timeout.connect(self._on_timer)
         self._timer.start()
 
+        # P4 needs its own, faster beat. The market timer above only repaints when a whole
+        # sim-minute has elapsed — and not at all while paused — so a fade driven by it would
+        # step three times at 1 min/s and then freeze mid-glow after a manual step or a pause.
+        self._flash_timer = QTimer(self)
+        self._flash_timer.setInterval(FLASH_MS)
+        self._flash_timer.timeout.connect(self._on_flash_timer)
+        self._flash_timer.start()
+
     # ---- layout ---- #
 
     def _build_ui(self) -> None:
@@ -774,6 +810,11 @@ class TraderGUI(QMainWindow):
         act_accent.triggered.connect(self.action_pick_accent)
         act_reset_accent = appearance_menu.addAction("Reset accent to green")
         act_reset_accent.triggered.connect(self.action_reset_accent)
+        appearance_menu.addSeparator()
+        self.act_flash = appearance_menu.addAction("Price flash on the board")
+        self.act_flash.setCheckable(True)
+        self.act_flash.setChecked(self.price_flash)     # set BEFORE connecting: no boot-time toggle
+        self.act_flash.toggled.connect(self.set_price_flash)
         help_act = self.menuBar().addMenu("Help").addAction("Shortcuts & commands")
         help_act.setShortcut("?")
         help_act.triggered.connect(self.show_help)
@@ -919,6 +960,7 @@ class TraderGUI(QMainWindow):
         root.addLayout(views)
 
         self.board_model = BoardModel(self.trader)
+        self.board_model.flash_on = self.price_flash    # restored by _restore_prefs_pre, above
         self.board = BoardView()
         self.board.setModel(self.board_model)
         self.board.setFont(mono)
@@ -1196,6 +1238,11 @@ class TraderGUI(QMainWindow):
             self._last_autosave = now
         if closures:
             self._notify_margin_call(closures)
+
+    @guard(context="price flash")
+    def _on_flash_timer(self) -> None:
+        """Fade the board's price flashes. Costs one dict scan when nothing is flashing."""
+        self.board_model.repaint_flashes()
 
     def _refresh_header(self) -> None:
         self.header_label.setText(header_html(self.trader.world))
@@ -1539,6 +1586,7 @@ class TraderGUI(QMainWindow):
         if self.playing:
             self.toggle_play()
         self.news.clear()
+        self.board_model.flash.clear()      # the old world's prices are not a baseline for this one
         self._rebuild_board()
         self._refresh_header()
         self._refresh_chart()
@@ -1593,6 +1641,20 @@ class TraderGUI(QMainWindow):
         self._log_line("Accent colour reset to phosphor green.", GREEN_HI)
         self.statusBar().showMessage("Accent: phosphor green (default)", 3000)
 
+    @guard(context="price flash toggle")
+    def set_price_flash(self, on: bool) -> None:
+        """Turn the board's price flash on or off — live, and remembered for next launch.
+
+        Clearing on the way *in* matters as much as on the way out: without it, switching the
+        feature back on would compare live prices against a baseline from whenever it was
+        switched off and light up the whole board at once."""
+        self.price_flash = bool(on)
+        self.board_model.flash_on = self.price_flash
+        self.board_model.flash.clear()
+        self.board_model.refresh()
+        update_settings({"price_flash": self.price_flash})
+        self.statusBar().showMessage(f"Price flash {'on' if self.price_flash else 'off'}", 3000)
+
     def set_accent(self, hex_color: str | None) -> None:
         """Point the live THEME at `hex_color` (None = default) and repaint. Persistence is the
         caller's job — this is the display half, and it's what the tests drive."""
@@ -1641,13 +1703,16 @@ class TraderGUI(QMainWindow):
     # bad one silently keeps the default, per the "never crash the UI over I/O" stance.
 
     def _restore_prefs_pre(self) -> None:
-        """Speed + chart range — restored before _build_ui so the initial labels render right."""
+        """Speed, chart range + price flash — restored before _build_ui, which bakes them into
+        the initial labels and the Appearance menu's checkmark."""
         idx = get_setting("speed")
         if isinstance(idx, int) and 0 <= idx < len(SPEEDS):
             self.speed_idx = idx
         idx = get_setting("chart_range")
         if isinstance(idx, int) and 0 <= idx < len(CHART_RANGES):
             self.chart_range = idx
+        if get_setting("price_flash") is False:     # on by default; only an explicit off is honoured
+            self.price_flash = False
 
     def _restore_prefs_post(self) -> None:
         """Geometry + board view + sort — these need the widgets, so run right after _build_ui."""

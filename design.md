@@ -481,8 +481,18 @@ Sizes: **S** = an evening slice, **M** = a full session.
 
 **Wave B — feel** *(GUI-first; the TUI gets the terminal bell where it's a one-liner)*
 
-- [ ] **P4 · Price-flash on the board** (S) — cells pulse P&L-green/red on tick moves, then fade.
-  Respects the accent-vs-semantics split (§ the V1.7+ theming work).
+- [x] **P4 · Price-flash on the board** (S) — a Price cell tints green when it ticks up and red
+  when it ticks down, fading out over 0.7s. Green/red are the P&L constants, never the accent
+  (the P2 split). The tint blends up from *that row's own* background — `BG` on even rows,
+  `PANEL` on odd, since the board alternates — so the fade ends exactly where the untinted cell
+  begins, and it peaks at 55% of the colour so the pale digits stay readable. `PriceFlash` is
+  pure and clock-injected (`update`/`alpha`/`tint` all take `now`), which makes the fade testable
+  without an event loop and means a stall can't freeze a flash half-lit. It has its own 60 ms
+  `QTimer`: the market timer only repaints on a whole sim-minute and stops dead when you pause,
+  so a fade driven by it would step three times and then freeze. Deliberately **quiet** — it
+  compares against the last price it *displayed*, so a first sighting, a paged-back-to row, a
+  view switch and a loaded world are all dark; only a move you could have watched happen flashes.
+  **Appearance ▸ Price flash** toggles it live and persists via P1. `gui_p4_price_flash.png`.
 - [ ] **P5 · Sound** (M) — retro chirps: fill, cancel, margin-call klaxon, black-swan stinger.
   Appearance ▸ Sound toggle persisted via P1. **Matthew: drop in PySynthRack for the synthesis.**
 - [ ] **P6 · Tray + toasts** (M) — minimise-to-tray option; Windows toasts for fills / margin

@@ -3,27 +3,29 @@
 Short, current, and disposable. The **full backlog lives in [`design.md` §11](design.md)**; this
 file is just "where we stopped and what to do next", so the two never drift apart.
 
-Last touched: **2026-08-23**. Head of `origin/master`: `6a46ffe` (P22), pushed.
+Last touched: **2026-08-23**. Local `master` is **two commits ahead of `origin/master`** —
+the TODO refresh and P4. **Push is yours to run** (`git push`).
 
 ---
 
 ## State right now
 
-**Wave A is complete** — P1, P2 and P3 are all shipped, committed *and* pushed. **201 tests pass**
-(`QT_QPA_PLATFORM=offscreen python -m pytest`), three consecutive clean full runs. Working tree is
-clean; nothing is half-finished.
+**Wave A is complete and Wave B is open.** **215 tests pass**
+(`QT_QPA_PLATFORM=offscreen python -m pytest`), two consecutive clean full runs, working tree
+clean. Nothing is half-finished.
 
-The last two commits on `master`:
+Committed locally, **not yet pushed**:
 
-* **`059e56b` · P3 · Autosave generations** — every autosave rotates `autosave` → `.1` → `.2`
-  (renames, not copies) before writing, and resume walks the chain newest-first until something
-  loads. When it lands on a backup it says so: amber in the TUI news pane, red in the GUI log.
-  `tui_p3_backup_resume.png` is the screenshot.
-* **`6a46ffe` · P22 · The error log was never silent** — unplanned, and the reason to keep doing
-  end-to-end smoke runs. `errlog`'s logger had no handler until `setup_logging()` ran, so stdlib
-  logging fell through to its handler of last resort and printed to **stderr** — and `run_tui()`
-  never called `setup_logging()` at all. Fixed with a `logging.NullHandler()` at import plus the
-  missing `setup_logging` call.
+* **P4 · Price flash on the board** — a Price cell tints green on an up-tick, red on a down-tick,
+  and fades over 0.7s. Quiet by design: it compares against the last price it *displayed*, so
+  first sightings, view switches, paging and loaded worlds stay dark. Its own 60 ms timer (the
+  market timer stops when you pause, which would freeze a fade mid-glow), a live
+  **Appearance ▸ Price flash** toggle persisted via P1, and `gui_p4_price_flash.png` for the
+  screenshot. Fourteen new tests; twenty mutations, twenty catches.
+* Earlier in the same session: a **TODO refresh** — the P3/P22 commit block had already been run.
+
+Shipped and pushed before that: **P3 · autosave generations** (`059e56b`) and **P22 · the error
+log was never silent** (`6a46ffe`).
 
 ### Three things worth remembering from P3
 
@@ -38,18 +40,18 @@ The last two commits on `master`:
 
 ## Next up
 
-### 1. Wave B — feel
-
-**P4 · Price-flash on the board** (S) — cells pulse P&L-green/red on tick moves, then fade. The
-natural first one: small, visible, and it respects the accent-vs-semantics split P2 established
-(flashes are P&L semantics, so `GREEN`/`RED`, not the themeable accent).
+### 1. Wave B — feel (continued)
 
 **P5 · Sound** (M) — retro chirps: fill, cancel, margin-call klaxon, black-swan stinger.
-**Matthew wants PySynthRack dropped in for the synthesis.** Appearance ▸ Sound toggle persists
-through P1's `get_setting`/`update_settings`.
+**Parked on purpose: Matthew wants to talk it through before it starts.** The open questions are
+the dependency (PySynthRack — synthesise at runtime, or bake WAVs at build time?), whether the
+frozen `.exe` grows an audio backend, and how loud/frequent is tolerable when the market ticks
+every second. Appearance ▸ Sound toggle would persist through P1's `get_setting`/`update_settings`
+exactly as P4's flash toggle now does.
 
 **P6 · Tray + toasts** (M) — minimise-to-tray, Windows toasts for fills / margin calls / black
-swans while hidden. The idle-friendly north star, delivered.
+swans while hidden. The idle-friendly north star, delivered. **Independent of the sound
+conversation** — this is the one to pick up if P5 stays parked.
 
 ### 2. Or jump the queue
 
@@ -60,7 +62,8 @@ passed to `TraderGUI.set_accent()`.
 
 The TUI news pane **clips long lines instead of wrapping** at narrow terminal widths — visible in
 `tui_p3_backup_resume.png`, where the existing "Resumed your last game · …" line is cut mid-word.
-Pre-existing, cosmetic, and only at ~132 columns or less. Fold it into P4 if it annoys you.
+Pre-existing, cosmetic, and only at ~132 columns or less. P4 turned out to be GUI-only, so this
+is still homeless — fold it into the next slice that touches the TUI.
 
 ---
 
@@ -81,7 +84,16 @@ Pre-existing, cosmetic, and only at ~132 columns or less. Fold it into P4 if it 
   deterministic. Re-run a failure three times against a pristine copy before shrugging it off.
 * **Green tests are not a smoke test.** P22 was invisible to 201 passing tests because nothing was
   watching stderr. Run the feature end-to-end and *read the output* before calling a slice done.
+* **Screenshots of the GUI need a real Qt platform.** `QT_QPA_PLATFORM=offscreen` has no fonts
+  in this environment and grabs a window full of tofu boxes. Drop the env var (plain
+  `python`), `gui.show()`, `app.processEvents()`, then `gui.grab().save(...)` — and clear the
+  board selection first, or the selection highlight hides the cell you're trying to show.
+* **A flash the selected row can't show.** Qt's default delegate paints the selection highlight
+  over `Qt.BackgroundRole`, so the cursor row never shows its price flash. Would need a custom
+  delegate; judged not worth it (P4).
 * **Theming rule of thumb** (post-P2): read `THEME.accent` at *format* time, never snapshot it.
   Long-lived widgets get styled from `_style_panels()`, not inline. Modal dialogs are exempt.
-* **Commits and pushes are Matthew's to run**, from PowerShell: repeated `-m` flags, never a
-  heredoc, no backticks in the message. **One explicit `git add <paths>` per commit.**
+* **Pushes are Matthew's to run.** Commits from the session are fine (the top-level
+  `CLAUDE.md` says so) — this note used to say both, from the cloud sessions where git wasn't
+  usable at all. When a command *is* handed over, it's PowerShell: repeated `-m` flags, never a
+  heredoc, no backticks in the message, **one explicit `git add <paths>` per commit**.
