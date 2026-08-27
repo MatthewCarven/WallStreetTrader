@@ -493,8 +493,13 @@ Sizes: **S** = an evening slice, **M** = a full session.
   compares against the last price it *displayed*, so a first sighting, a paged-back-to row, a
   view switch and a loaded world are all dark; only a move you could have watched happen flashes.
   **Appearance ▸ Price flash** toggles it live and persists via P1. `gui_p4_price_flash.png`.
-- [ ] **P5 · Sound** (M) — retro chirps: fill, cancel, margin-call klaxon, black-swan stinger.
-  Appearance ▸ Sound toggle persisted via P1. **Matthew: drop in PySynthRack for the synthesis.**
+- [ ] **P5 · Sound** (M) — retro chirps for fills, resting orders, the margin call and the black
+  swan. Appearance ▸ Sound toggle persisted via P1. **PySynthRack does the synthesis from the
+  command line** — patches rendered to WAVs at build time and committed with them, so the runtime
+  gains no dependency (PySide6 already ships QtMultimedia). **All four are quiet**: they differ in
+  character, not volume — "klaxon" and "stinger" above were the wrong words, and the sound design
+  answers to the toggle you never feel the need to reach for. Splits into L1 (design + render +
+  audition) and L2 (wiring). See `TODO.md` for the recipe.
 - [ ] **P6 · Tray + toasts** (M) — minimise-to-tray option; Windows toasts for fills / margin
   calls / black swans while hidden. The idle-friendly north star (§1), delivered.
 

@@ -57,7 +57,11 @@ log was never silent** (`6a46ffe`).
   already there. **Unverified:** whether the CLI transport needs a real output device, or whether
   a dummy/offline backend is required on a machine with none.
 * **All four events make a sound**: your own fills, resting orders (fired + cancelled), the
-  margin-call klaxon, the black-swan stinger.
+  margin call, the black swan.
+* **And all of them are quiet.** Matthew's steer, and it overrides the backlog's "klaxon" and
+  "stinger" wording: the events differ in *character*, not in volume. Short, soft, low-headroom —
+  something you can leave on for an hour without reaching for the toggle. If one needs more
+  presence it earns it at the audition, not by default.
 * **Two slices.** *L1 sound design* — patches + WAVs, rendered and auditioned, nothing wired, so a
   sound you dislike costs nothing to throw away. *L2 wiring* — playback, the Appearance ▸ Sound
   toggle persisted via P1 exactly as P4's flash toggle is, and the TUI's terminal bell where it's
