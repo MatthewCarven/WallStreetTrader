@@ -22,3 +22,6 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
+
+# Install-local GUI/TUI preferences (P1 session memory), written beside the saves
+settings.json
