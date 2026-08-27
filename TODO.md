@@ -3,8 +3,10 @@
 Short, current, and disposable. The **full backlog lives in [`design.md` §11](design.md)**; this
 file is just "where we stopped and what to do next", so the two never drift apart.
 
-Last touched: **2026-08-23**. Everything through `e8ff152` is **pushed** — P4 and the P5
-decision notes. (Only this line's own commit trails it; push it whenever.)
+Last touched: **2026-08-23**. This line used to name the last pushed commit, which made it stale
+the moment anything else landed — twice in one session. It doesn't any more: **ask git**
+(`git status`, or `git log --oneline origin/master..HEAD` for exactly what's waiting). Pushes stay
+Matthew's to run.
 
 ---
 
