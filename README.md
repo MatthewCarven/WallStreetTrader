@@ -85,7 +85,7 @@ not slots, so the `Ctrl+L` browser doesn't list them; deleting the autosave remo
 
 ```bash
 pip install PySide6 pyqtgraph
-python play_gui.py              # or:  python -m trader_pro.gui
+python play_gui.py              # or:  python -m trader_pro.gui  (or: start_gui.cmd)
 ```
 
 A native desktop client over the same engine, at feature parity with the TUI. A live market board

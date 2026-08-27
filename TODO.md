@@ -82,9 +82,11 @@ passed to `TraderGUI.set_accent()`.
 ### Filed this session — P4b · the flash the TUI never got
 
 **Matthew launched the game, looked for the price flash, and saw nothing — because `start.cmd`
-runs `python play_tui.py`.** He plays this in the **TUI**, and Wave B is landing in the GUI.
-That's design.md's stated "GUI-first" policy meeting the person who actually uses the thing, and
-the policy loses.
+runs `python play_tui.py`.** The cause turned out to be the launcher, not the policy: the GUI had
+no `.cmd` at all, so the TUI was the only front-end you could start without remembering a
+filename. He's since written `start_gui.cmd`, seen P4 in the GUI, and pronounced it awesome — so
+**GUI-first stands** and P4b is a *someday*, not a *should*. The rider that survives: a slice
+that isn't front-end-specific (P5's sounds) should reach the TUI on day one, not as a follow-up.
 
 **P4b · Price flash in the TUI** (S) — port it. The pure layer already carries over untouched:
 `PriceFlash` is Qt-free precisely so this is possible, and the TUI board is a Textual `DataTable`

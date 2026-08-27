@@ -479,9 +479,10 @@ Sizes: **S** = an evening slice, **M** = a full session.
   slots with three near-identical rows) and deleting the autosave takes all three, or the slot
   you just deleted would come back at next launch. **Wave A complete.**
 
-**Wave B — feel** *(was "GUI-first; the TUI gets the terminal bell where it's a one-liner" —
-**revisit**: `start.cmd` runs the TUI and that is the front-end actually being played, so shipping
-"feel" to the GUI alone ships it where nobody is looking. See P4b and `TODO.md`.)*
+**Wave B — feel** *(GUI-first, but only just: the reason the TUI looked like the played
+front-end is that `start.cmd` launched it and the GUI had no launcher at all. `start_gui.cmd`
+fixes that. The policy stands — with the rider that a front-end-agnostic slice like P5's sounds
+should reach the TUI on day one rather than as a follow-up. See P4b.)*
 
 - [x] **P4 · Price-flash on the board** (S) — a Price cell tints green when it ticks up and red
   when it ticks down, fading out over 0.7s. Green/red are the P&L constants, never the accent
