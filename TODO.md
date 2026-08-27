@@ -12,22 +12,19 @@ Matthew's to run.
 
 ## State right now
 
-**Wave A is complete and Wave B is open.** **215 tests pass**
-(`QT_QPA_PLATFORM=offscreen python -m pytest`), two consecutive clean full runs, working tree
-clean. Nothing is half-finished.
+**Wave A complete; Wave B open and now landing in both front-ends.** **219 tests pass**
+(`QT_QPA_PLATFORM=offscreen python -m pytest`), working tree clean.
 
-Committed locally, **not yet pushed**:
-
-* **P4 · Price flash on the board** — a Price cell tints green on an up-tick, red on a down-tick,
-  and fades over 0.7s. Quiet by design: it compares against the last price it *displayed*, so
-  first sightings, view switches, paging and loaded worlds stay dark. Its own 60 ms timer (the
-  market timer stops when you pause, which would freeze a fade mid-glow), a live
-  **Appearance ▸ Price flash** toggle persisted via P1, and `gui_p4_price_flash.png` for the
-  screenshot. Fourteen new tests; twenty mutations, twenty catches.
-* Earlier in the same session: a **TODO refresh** — the P3/P22 commit block had already been run.
-
-Shipped and pushed before that: **P3 · autosave generations** (`059e56b`) and **P22 · the error
-log was never silent** (`6a46ffe`).
+* **P4 · Price flash (GUI)** — a Price cell tints green on an up-tick, red on a down-tick, fading
+  over 0.7s. Quiet by design: it compares against the last price it *displayed*, so first
+  sightings, view switches, paging and loaded worlds stay dark. Its own 60ms timer, an
+  **Appearance ▸ Price flash** toggle persisted via P1. `gui_p4_price_flash.png`.
+* **P4b · Price flash (TUI)** — the same thing in the terminal, filed and shipped the moment it
+  turned out the TUI is what gets launched. The mechanism moved to `trader_pro/flash.py`
+  unchanged; the terminal-specific half is reading the DataTable's real zebra colours to fade
+  onto and repainting single cells with `update_cell_at`. One `price_flash` preference governs
+  **both** front-ends. `tui_p4b_price_flash.svg`.
+* **`start_gui.cmd`** — the GUI has a launcher now, which is why P4 was invisible in the first place.
 
 ### Three things worth remembering from P3
 
@@ -81,29 +78,6 @@ conversation** — this is the one to pick up if P5 stays parked.
 **P14 · Theme presets + CRT scanlines** (S/M) — unblocked since P2; presets are just named accents
 passed to `TraderGUI.set_accent()`.
 
-### Filed this session — P4b · the flash the TUI never got
-
-**Matthew launched the game, looked for the price flash, and saw nothing — because `start.cmd`
-runs `python play_tui.py`.** The cause turned out to be the launcher, not the policy: the GUI had
-no `.cmd` at all, so the TUI was the only front-end you could start without remembering a
-filename. He's since written `start_gui.cmd`, seen P4 in the GUI, and pronounced it awesome — so
-**GUI-first stands** and P4b is a *someday*, not a *should*. The rider that survives: a slice
-that isn't front-end-specific (P5's sounds) should reach the TUI on day one, not as a follow-up.
-
-**P4b · Price flash in the TUI** (S) — port it. The pure layer already carries over untouched:
-`PriceFlash` is Qt-free precisely so this is possible, and the TUI board is a Textual `DataTable`
-of Rich `Text` cells, so the tint is a `style="on #1d6830"` on the price cell plus a
-`set_interval(~0.06)` to drive the fade (the TUI's tick loop has the same problem the GUI's did —
-it can't drive a fade on its own). `row_background` needs a TUI answer: `zebra_stripes` colours
-come from the Textual theme rather than from our `BG`/`PANEL`, so either read them or blend from
-a single agreed base. **Caveat: needs a truecolor terminal** — fine in Windows Terminal, degrades
-to nearest-256 in old conhost.
-
-**And the bigger question it raises**, worth settling before P5 and P6 rather than after: if the
-TUI is the front-end being *played*, then "GUI-first" is the wrong default for the whole of Wave
-B. P6 (tray + toasts) is inherently desktop and can't move — but P5's sounds are front-end
-agnostic and should probably reach the TUI on day one, not as a follow-up.
-
 ### Small thing noticed, not filed
 
 The TUI news pane **clips long lines instead of wrapping** at narrow terminal widths — visible in
@@ -130,6 +104,13 @@ is still homeless — fold it into the next slice that touches the TUI.
   deterministic. Re-run a failure three times against a pristine copy before shrugging it off.
 * **Green tests are not a smoke test.** P22 was invisible to 201 passing tests because nothing was
   watching stderr. Run the feature end-to-end and *read the output* before calling a slice done.
+* **`cairosvg` is not installed locally**, so a TUI slice gets an `.svg` and no `.png`. The
+  export itself is unchanged: `app.export_screenshot()` inside `run_test`.
+* **Don't measure a 0.7s effect with `pilot.press()`.** It can take most of a second to return
+  (P17's key coalescing, plus the pilot waiting for the app to settle) — longer than the thing
+  you're trying to observe. A screenshot taken that way came back empty and looked like a broken
+  feature; it was a broken measurement. Drive `_advance` + `_refresh` directly and hand the
+  painter an explicit `now`.
 * **Screenshots of the GUI need a real Qt platform.** `QT_QPA_PLATFORM=offscreen` has no fonts
   in this environment and grabs a window full of tofu boxes. Drop the env var (plain
   `python`), `gui.show()`, `app.processEvents()`, then `gui.grab().save(...)` — and clear the

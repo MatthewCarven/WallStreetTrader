@@ -13,6 +13,7 @@ from ..core import AssetKind, World, load_seed_universe
 from ..core.engine import DAY, HOUR, WEEK
 from ..core.orders import fee_rate
 from ..core.portfolio import MAINTENANCE_MARGIN_RATIO
+from ..flash import FLASH_PEAK, FLASH_SECS, PriceFlash, blend_hex   # noqa: F401 — re-export
 from ..persistence import autosave_path, has_autosave, load_autosave
 
 # Live-play speeds as ticks (sim-minutes) advanced per REAL second — mirrors tui.py SPEEDS.
@@ -293,105 +294,22 @@ def cell(ctx: RowCtx, col_id: str) -> Cell:
 
 
 # --------------------------------------------------------------------------- #
-# P4 — price flash. Pure and clock-injected: `app.py` passes time.monotonic().
+# P4 — price flash. The mechanism moved to `trader_pro.flash` for P4b, when the
+# TUI wanted the same behaviour; it is re-exported here so the GUI (and the
+# tests written against it) keep one import. Only the *painting* half is
+# GUI-specific, and that is `row_background` below.
 # --------------------------------------------------------------------------- #
-
-FLASH_SECS = 0.7      # a flash fades to nothing this many REAL seconds after the move
-FLASH_PEAK = 0.55     # strongest blend toward GREEN / RED, at the instant of the move
-
-
-def blend_hex(base: str, over: str, amount: float) -> str:
-    """``base`` mixed ``amount`` (0–1) of the way toward ``over``; both ``#rrggbb``.
-
-    Unlike :func:`_scale_hex`, which brightens or dims one colour, this interpolates between two
-    — the fade needs an endpoint (the row's own background), or a flash on a dark board would
-    fade toward black instead of toward the cell it came from."""
-    amount = max(0.0, min(1.0, amount))
-    chans = []
-    for i in (1, 3, 5):
-        b, o = int(base[i:i + 2], 16), int(over[i:i + 2], 16)
-        chans.append(round(b + (o - b) * amount))
-    return "#{:02x}{:02x}{:02x}".format(*chans)
 
 
 def row_background(row: int) -> str:
     """The board's *own* background behind ``row``: Qt paints even rows ``BG`` and odd rows
     ``PANEL`` (``setAlternatingRowColors``). A flash blends up from this exact colour, so when it
-    reaches zero the cell is already the shade the untinted painter would draw — no snap."""
+    reaches zero the cell is already the shade the untinted painter would draw — no snap.
+
+    The TUI's answer to the same question is different (its zebra stripes come from the Textual
+    theme, not from these constants), which is exactly why this stayed behind when `PriceFlash`
+    moved out — see `TraderTUI._row_bases`."""
     return BG if row % 2 == 0 else PANEL
-
-
-class PriceFlash:
-    """Which board rows just moved, and how brightly they should still be glowing.
-
-    The oldest trick on a trading screen: a price that ticks up flashes green, down flashes red,
-    and the tint fades out over :data:`FLASH_SECS`. Two deliberate properties:
-
-    * **Clock-injected.** Every method takes ``now``, so the fade is unit-testable with no event
-      loop, and — because alpha is a function of wall-clock rather than of frames drawn — a stall
-      or a paused market can't leave a flash frozen half-lit on screen.
-    * **Baseline, not history.** It remembers the last price it was *shown*, not the market's. An
-      asset it has never seen cannot flash, which is what keeps view switches and paging silent:
-      you have to watch a price move for it to light up.
-    """
-
-    __slots__ = ("duration", "_last", "_hits")
-
-    def __init__(self, duration: float = FLASH_SECS) -> None:
-        self.duration = max(0.01, float(duration))       # never divide by zero in alpha()
-        self._last: dict[str, float] = {}                # aid -> the price we last displayed
-        self._hits: dict[str, tuple[int, float]] = {}    # aid -> (+1 up / -1 down, started at)
-
-    def update(self, prices, now: float) -> None:
-        """Take the board's current ``{aid: price}`` and start a flash on everything that moved.
-
-        Assets **absent** from ``prices`` are forgotten — that is what makes paging and view
-        switches silent rather than a wall of flashes, since an asset you page back to is unknown
-        again and its first sighting only re-seeds the baseline."""
-        for aid, price in prices.items():
-            prev = self._last.get(aid)
-            if prev is not None and price != prev:
-                self._hits[aid] = (1 if price > prev else -1, now)
-        self._last = dict(prices)
-        for aid in [a for a, (_dir, started) in self._hits.items()
-                    if a not in self._last or now - started >= self.duration]:
-            del self._hits[aid]                          # or the dict grows for the whole session
-
-    def alpha(self, aid: str, now: float) -> float:
-        """How much of ``aid``'s flash is left: 1.0 at the move, 0.0 once it has faded out."""
-        hit = self._hits.get(aid)
-        if hit is None:
-            return 0.0
-        return max(0.0, min(1.0, 1.0 - (now - hit[1]) / self.duration))
-
-    def direction(self, aid: str, now: float) -> int:
-        """``+1`` up, ``-1`` down, ``0`` when nothing of this asset's flash is left."""
-        hit = self._hits.get(aid)
-        return hit[0] if hit is not None and self.alpha(aid, now) > 0.0 else 0
-
-    def tint(self, aid: str, now: float, base: str) -> str | None:
-        """``base`` tinted toward GREEN / RED for a flashing asset, else ``None`` (don't paint).
-
-        The blend peaks at :data:`FLASH_PEAK`, not at the full colour: the digits keep their own
-        pale-phosphor foreground, and a saturated cell would drown them for a third of a second.
-        Green up and red down are P&L *semantics*, so they are the module constants, never the
-        themeable accent (the P2 split)."""
-        amount = self.alpha(aid, now)
-        if amount <= 0.0:
-            return None
-        up = self._hits[aid][0] > 0
-        return blend_hex(base, GREEN if up else RED, FLASH_PEAK * amount)
-
-    def live(self, now: float) -> bool:
-        """True while at least one flash is still fading — the repaint timer's cheap early-out."""
-        return any(self.alpha(aid, now) > 0.0 for aid in self._hits)
-
-    def clear(self) -> None:
-        """Forget every flash *and* every baseline. Wanted whenever the prices on screen stop
-        being comparable with the ones before them — a loaded or new world, or the feature being
-        switched back on — where a plain repaint would otherwise light up the entire board."""
-        self._last.clear()
-        self._hits.clear()
 
 
 def default_watchlist(world) -> list[str]:

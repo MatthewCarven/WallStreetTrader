@@ -496,6 +496,16 @@ should reach the TUI on day one rather than as a follow-up. See P4b.)*
   compares against the last price it *displayed*, so a first sighting, a paged-back-to row, a
   view switch and a loaded world are all dark; only a move you could have watched happen flashes.
   **Appearance ▸ Price flash** toggles it live and persists via P1. `gui_p4_price_flash.png`.
+- [x] **P4b · Price flash in the TUI** (S) — the same flash, terminal-side, filed the moment it
+  turned out the TUI is what gets launched. The mechanism moved to `trader_pro/flash.py` — pure,
+  front-end agnostic, and unchanged by the move, which is the dividend for having kept it
+  clock-injected and Qt-free in P4. The terminal half is: read the DataTable's *real* zebra
+  colours at mount (`zebra_stripes` composites a translucent overlay, so the fade endpoint has to
+  be computed, not declared), capture each row's untinted price cell as it is built, and repaint
+  only the cells whose state changed via `update_cell_at`. Its own 0.06s `set_interval`, for the
+  same reason the GUI needed one — the 0.3s market timer stops dead when you pause or open a
+  modal. One preference (`price_flash`) governs both front-ends, so the GUI's Appearance toggle
+  turns the TUI's flash off too. `tui_p4b_price_flash.svg`.
 - [ ] **P5 · Sound** (M) — retro chirps for fills, resting orders, the margin call and the black
   swan. Appearance ▸ Sound toggle persisted via P1. **PySynthRack does the synthesis from the
   command line** — patches rendered to WAVs at build time and committed with them, so the runtime

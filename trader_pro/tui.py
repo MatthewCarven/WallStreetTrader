@@ -21,6 +21,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
+from textual.coordinate import Coordinate
 from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, Select, Static
 from rich.text import Text
 
@@ -32,6 +33,11 @@ from .core import (
 from .core.engine import DAY, HOUR, WEEK
 from .core.orders import fee_rate
 from .errlog import setup_logging
+from .flash import FLASH_SECS, PriceFlash
+# The preferences file is Qt-free and lives in the gui package only for historical reasons
+# (it was written for P1). Reading it here is what makes one Appearance ▸ Price flash
+# toggle govern both front-ends instead of two settings that can disagree.
+from .gui.settings import get_setting
 from .persistence import (
     SAVES_DIR, save_game, load_game, list_saves, delete_save, slot_path,
     autosave_path, has_autosave, save_autosave, load_autosave, AUTOSAVE_SLOT,
@@ -834,6 +840,15 @@ class TraderTUI(App):
         self._step_drain_scheduled = False      # …and whether a drain timer is already armed
         self._ticker_base = ""               # cached marquee string; sliced each timer for the scroll
         self._ticker_off = 0
+        # P4b — price flash. `_price_cells` maps a board row index to (aid, price, untinted cell)
+        # and is rebuilt by _refresh; `_tinted` is the set of rows currently wearing a tint, so a
+        # fade frame only repaints what actually changed. `_row_bases` is filled at mount from the
+        # DataTable's own zebra colours — the endpoint each fade lands on.
+        self._flash = PriceFlash()
+        self._flash_on = True
+        self._price_cells: dict[int, tuple[str, float, Text]] = {}
+        self._tinted: set[int] = set()
+        self._row_bases = ("#07120b", "#07120b")
         notable = ["AAPL", "MSFT", "NVDA", "AMZN", "JPM", "XOM", "GOOGL", "TSLA"]
         w = trader.world
         self.watch: list[str] = [f"CRYPTO:{c.symbol}" for c in w.universe.crypto]
@@ -867,7 +882,13 @@ class TraderTUI(App):
         self.query_one("#equity", Static).border_title = "net worth"
         self.query_one("#chart", Static).border_title = "chart"
         self.set_focus(table)
+        self._flash_on = get_setting("price_flash") is not False   # shared with the GUI's toggle
+        self._row_bases = self._row_bases_from(table)
         self.set_interval(0.3, self._on_timer)
+        # P4b: the fade needs a beat of its own. The 0.3s market timer only repaints when a whole
+        # sim-minute has passed and stops entirely while paused or a modal is up, so a fade driven
+        # by it would step twice and then freeze mid-glow. This one early-outs on a dict scan.
+        self.set_interval(0.06, self._tick_flash)
         self._last_autosave = time.monotonic()
         self._log(Text("╔═ Welcome to TRADER PRO ═╗", style=f"bold {GREEN_HI}"))
         self._log(Text("Space=play  [ ]=speed  5=movers  o=sort  c=chart  Ctrl+S/L=save/load  :=cmd  ?=help",
@@ -1117,6 +1138,72 @@ class TraderTUI(App):
         """The BOARD_COLUMNS currently shown, in fixed left-to-right order."""
         return [c for c in BOARD_COLUMNS if self.col_visible.get(c[0], True)]
 
+    # ---- price flash (P4b) ---- #
+
+    @staticmethod
+    def _row_bases_from(table: DataTable) -> tuple[str, str]:
+        """``(even-row, odd-row)`` background hexes — the colours a fade has to land on.
+
+        The GUI can name its two row colours outright; here they come from the Textual theme,
+        because ``zebra_stripes`` paints a translucent overlay (15% of a blue) over the widget's
+        own background rather than a colour we chose. Composing them at mount gets the real
+        endpoint, so the last frame of a fade is already the shade the untinted cell would be.
+        Defensive: any change in Textual's component classes leaves the flash fading onto the
+        screen background, which is wrong by a couple of channels rather than broken."""
+        try:
+            base = table.background_colors[1]
+            return tuple((base + table.get_component_styles(name).background).hex.lower()
+                         for name in ("datatable--even-row", "datatable--odd-row"))
+        except Exception:
+            return ("#07120b", "#07120b")
+
+    def _price_col(self) -> int | None:
+        """Index of the Price column among the *visible* ones — None while it's hidden (Ctrl+2)."""
+        for i, (cid, _, _) in enumerate(self._visible_columns()):
+            if cid == "price":
+                return i
+        return None
+
+    def _paint_flashes(self, table: DataTable, now: float) -> None:
+        """Tint — or un-tint — exactly the price cells whose state changed this frame.
+
+        `_tinted` is what keeps this cheap: a row that isn't flashing and wasn't flashing is
+        skipped entirely, so a quiet board costs a dict scan rather than 25 cell updates."""
+        col = self._price_col()
+        if col is None:                       # price column hidden: nothing to paint onto
+            self._tinted.clear()
+            return
+        for row, (aid, _price, plain) in self._price_cells.items():
+            tint = self._flash.tint(aid, now, self._row_bases[row % 2])
+            if tint is None:
+                if row not in self._tinted:
+                    continue                  # never lit; leave it alone
+                self._tinted.discard(row)     # just went dark — one last repaint, untinted
+                value = plain
+            else:
+                self._tinted.add(row)
+                value = plain.copy()
+                value.style = f"on {tint}"
+            try:
+                table.update_cell_at(Coordinate(row, col), value, update_width=False)
+            except Exception:
+                return                        # board rebuilt under us; _refresh repaints anyway
+
+    def _tick_flash(self) -> None:
+        """Advance the fade between market ticks. Early-outs before touching a widget."""
+        if not self._flash_on or not self.is_running or not self._price_cells:
+            return
+        if len(self.screen_stack) > 1:        # a modal owns the screen; #board isn't queryable
+            return
+        now = time.monotonic()
+        if not self._flash.live(now) and not self._tinted:
+            return                            # nothing lit, and nothing left to clean up
+        try:
+            table = self.query_one("#board", DataTable)
+        except Exception:
+            return
+        self._paint_flashes(table, now)
+
     def _separator_row(self, table: DataTable, label: Text, key: str, *, hint_1d: bool = False) -> None:
         """A banner / pager row (movers headers, the 'Next page' row). Emits exactly one cell per
         *visible* column: the label in the first, blanks in the rest -- except the 1D% column keeps
@@ -1149,7 +1236,12 @@ class TraderTUI(App):
         # alike (a short profits as price falls). Fees are ignored, matching the side panel's P&L.
         pnl = (price - cost) / cost * 100 * (1.0 if qty >= 0 else -1.0) if (qty and cost) else 0.0
         ctx = _RowCtx(aid.split(":", 1)[1], price, chg, chg7d, chg31d, qty, qty * price, cost, pnl)
-        table.add_row(*[render(ctx) for _, _, render in self._visible_columns()], key=aid)
+        cells = [render(ctx) for _, _, render in self._visible_columns()]
+        if self._flash_on:
+            col = self._price_col()
+            if col is not None:               # row_count is the index this row is about to get
+                self._price_cells[table.row_count] = (aid, price, cells[col])
+        table.add_row(*cells, key=aid)
 
     def _refresh(self, keep_row: bool = False) -> None:
         w = self.trader.world
@@ -1170,6 +1262,8 @@ class TraderTUI(App):
             except Exception:
                 prev_key = None
         prev_row = table.cursor_row
+        self._price_cells = {}                # rebuilt row-by-row below; indices shift every time
+        self._tinted.clear()
         table.clear()
         row_keys: list[str] = []
         if self.movers:
@@ -1222,6 +1316,13 @@ class TraderTUI(App):
             self.cursor_aid = landed if w.has_asset(landed) else None
             self._render_status()
             self._render_chart()
+
+        # P4b: feed the flash the prices this board is *showing* and light the new rows in the
+        # same frame — waiting for the 60ms timer would flicker the tint off on every advance.
+        if self._flash_on:
+            now = time.monotonic()
+            self._flash.update({aid: price for aid, price, _c in self._price_cells.values()}, now)
+            self._paint_flashes(table, now)
 
         port = Text()
         if not pf.positions:

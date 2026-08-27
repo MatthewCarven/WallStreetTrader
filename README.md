@@ -66,6 +66,11 @@ highlighted asset**, your positions, and a scrolling news log.
 | `Ctrl+S` / `Ctrl+L` | save · load (the load browser lists slots with net worth, return, and age) |
 | `?` | help · `q` quit (autosaves first) |
 
+Board prices **flash green on an up-tick and red on a down-tick**, fading out over ~0.7s — the
+same behaviour as the desktop GUI, and governed by the same saved preference, so switching it off
+in the GUI's **Appearance ▸ Price flash** switches it off here too. (Wants a truecolour terminal;
+Windows Terminal is one.)
+
 The game **autosaves** as you play and on quit; relaunching `play_tui.py` **resumes your last
 game** automatically (press `Ctrl+N` for a fresh one). Saves live in `saves/<slot>.world` and are
 written atomically (a crash mid-save can't corrupt a slot). The autosave additionally keeps two

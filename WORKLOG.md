@@ -2172,3 +2172,81 @@ empty**. Green tests still aren't a smoke test.
 Wave B is open. Next is **P5 · sound** — which Matthew wants to talk through before it starts, so
 it is parked, not started. **P6 · tray + toasts** and **P14 · theme presets** are both available
 and independent of that conversation.
+
+## 2026-08-23 (cont.) — P4b · the price flash in the TUI
+
+Filed and shipped in the same session it was discovered, which is unusual here and worth saying
+why. Matthew launched the game to look at P4, saw nothing, and assumed he'd done something wrong.
+He hadn't: `start.cmd` runs `python play_tui.py`, the GUI had no launcher at all, and P4 had
+shipped GUI-only on the strength of design.md's own "Wave B is GUI-first" note. **The feature was
+fine and the aim was wrong.** He wrote `start_gui.cmd` himself (now committed), so the immediate
+cause is dead either way — but a "feel" wave that only lands in one of two front-ends is worth
+fixing rather than noting.
+
+**The move cost nothing, which was the whole point.** `PriceFlash` came out of `gui/model.py` into
+`trader_pro/flash.py` without a line changing inside it. Both properties that made it portable
+were chosen while it was still GUI-only and had no second caller to justify them: it takes `now`
+rather than reading a clock, and it knows nothing about colour beyond two hex strings. What stayed
+behind is the half that genuinely differs — `row_background()` is Qt-specific, because the two
+front-ends disagree about what a row's background *is*. The P&L hexes are now duplicated between
+`flash.py` and `gui/model.py` on purpose (the shared module must not import a front-end package),
+with a test pinning the copies together so they can't drift.
+
+**Reading the zebra stripes instead of declaring them.** The GUI can name its two row colours
+outright. Textual's `zebra_stripes` doesn't work that way: even rows get a *translucent* overlay
+(15% of a blue) composited over the widget's background, so the endpoint a fade has to land on is
+`background + overlay` and has to be computed at mount. `_row_bases_from()` does that through
+Textual's own `Color.__add__`, and falls back to the screen background if the component-class names
+ever move — wrong by a couple of channels rather than broken. This is the detail a mutation caught:
+blending every row from the *even* base looks perfectly fine on screen and is still wrong, so the
+test pins the tint by exact value rather than by "is it greenish".
+
+**Repaint what changed, not what exists.** `_refresh()` rebuilds the whole board — `clear()` then
+`add_row` — so the flash captures each row's untinted price cell as it goes past, and the fade
+frames afterwards go through `update_cell_at` on just that one column. A `_tinted` set tracks which
+rows are currently wearing a tint, so a row that isn't flashing and wasn't flashing is skipped
+entirely: a quiet board costs one dict scan every 60ms. The freshly built rows are painted inside
+`_refresh` itself rather than left to the next timer beat, or every market tick would flicker the
+tint off for up to 60ms.
+
+**And a second timer here too**, for the reason the GUI needed one: the 0.3s market timer only
+repaints on a whole sim-minute and returns early while paused or while a modal owns the screen.
+The smoke run pins the consequence — pause the market mid-flash and the fade still completes.
+
+**One preference, two front-ends.** The TUI reads the same `price_flash` key the GUI's
+**Appearance ▸ Price flash** writes, so the toggle governs both rather than two settings that can
+disagree. That means `tui.py` imports from `trader_pro.gui.settings`, which looks like a layering
+violation and half is: the file is Qt-free and the `gui` package is deliberately import-light
+(verified — it imports fine with PySide6 poisoned), but it lives there for historical reasons
+only. If P5 gives the TUI a sound toggle, `settings.py` should move up a level first.
+
+### Tests
+
+**219 pass** (was 215). Four new in `tests/test_tui_flash.py`, two of them pure and two driving a
+real Textual app: the shared-mechanism pin, the `_row_bases_from` fallback, and a long scenario
+covering a dark board at rest, every row lighting on a day step, the direction reading correctly,
+each row fading onto *its own* zebra shade by exact value, only the Price column painting, the
+fade completing on an injected clock, the fade advancing with nobody calling it, view switches
+staying silent, the price column being hidden (Ctrl+2) without a crash, and the feature switched
+off tracking nothing — plus one that writes `price_flash: false` and asserts the TUI honours the
+GUI's toggle at boot.
+
+**Eleven mutations, eleven catches** — two of them only after the tests grew. `_paint_flashes`
+never called from `_refresh` · every column tinted · row parity ignored · a dead flash never
+un-tinted · `_price_cells` not reset before a rebuild · a hidden price column still tracked · the
+toggle ignored while building rows · the persisted preference ignored · row bases never read from
+the theme · the fade timer never started · the fade timer running at the market cadence. The two
+that escaped the first sweep were parity (fixed by pinning the tint's exact value) and the timer
+(fixed by finding it in `app._timers` *and* asserting the tint moves on its own).
+
+**Smoke run:** the fastest speed tier for two seconds with stderr captured — 528 lit-cell samples,
+empty stderr, the error log untouched, and **zero cells still lit 0.9s after pausing**.
+
+### A note on measuring this thing
+
+`pilot.press()` can take most of a second to return (P17's key coalescing plus the pilot waiting
+for the app to settle), which is longer than a flash lasts. An early screenshot attempt came back
+with no tint at all and looked like a bug in the feature; it was a bug in the measurement. Drive
+`_advance` + `_refresh` directly and hand `_paint_flashes` an explicit `now` — the same clock
+injection the unit tests use. Also: **`cairosvg` isn't installed locally**, so this slice has an
+SVG screenshot and no PNG.
