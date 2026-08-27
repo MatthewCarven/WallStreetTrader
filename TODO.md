@@ -79,6 +79,27 @@ conversation** — this is the one to pick up if P5 stays parked.
 **P14 · Theme presets + CRT scanlines** (S/M) — unblocked since P2; presets are just named accents
 passed to `TraderGUI.set_accent()`.
 
+### Filed this session — P4b · the flash the TUI never got
+
+**Matthew launched the game, looked for the price flash, and saw nothing — because `start.cmd`
+runs `python play_tui.py`.** He plays this in the **TUI**, and Wave B is landing in the GUI.
+That's design.md's stated "GUI-first" policy meeting the person who actually uses the thing, and
+the policy loses.
+
+**P4b · Price flash in the TUI** (S) — port it. The pure layer already carries over untouched:
+`PriceFlash` is Qt-free precisely so this is possible, and the TUI board is a Textual `DataTable`
+of Rich `Text` cells, so the tint is a `style="on #1d6830"` on the price cell plus a
+`set_interval(~0.06)` to drive the fade (the TUI's tick loop has the same problem the GUI's did —
+it can't drive a fade on its own). `row_background` needs a TUI answer: `zebra_stripes` colours
+come from the Textual theme rather than from our `BG`/`PANEL`, so either read them or blend from
+a single agreed base. **Caveat: needs a truecolor terminal** — fine in Windows Terminal, degrades
+to nearest-256 in old conhost.
+
+**And the bigger question it raises**, worth settling before P5 and P6 rather than after: if the
+TUI is the front-end being *played*, then "GUI-first" is the wrong default for the whole of Wave
+B. P6 (tray + toasts) is inherently desktop and can't move — but P5's sounds are front-end
+agnostic and should probably reach the TUI on day one, not as a follow-up.
+
 ### Small thing noticed, not filed
 
 The TUI news pane **clips long lines instead of wrapping** at narrow terminal widths — visible in
