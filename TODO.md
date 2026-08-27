@@ -43,11 +43,28 @@ log was never silent** (`6a46ffe`).
 ### 1. Wave B — feel (continued)
 
 **P5 · Sound** (M) — retro chirps: fill, cancel, margin-call klaxon, black-swan stinger.
-**Parked on purpose: Matthew wants to talk it through before it starts.** The open questions are
-the dependency (PySynthRack — synthesise at runtime, or bake WAVs at build time?), whether the
-frozen `.exe` grows an audio backend, and how loud/frequent is tolerable when the market ticks
-every second. Appearance ▸ Sound toggle would persist through P1's `get_setting`/`update_settings`
-exactly as P4's flash toggle now does.
+**Talked through 2026-08-23; settled:**
+
+* **PySynthRack is a build-time tool, not a dependency.** Author patches, render them to WAVs from
+  the command line, commit *both* (a chirp stays re-renderable, not a mystery binary). Trader Pro
+  gains no runtime dep: PySide6 6.11.1 already ships QtMultimedia, so `QSoundEffect` plays them.
+  This is what keeps P15's exe diet alive — a runtime PySynthRack would drag in numpy + scipy +
+  a PortAudio binary.
+* **The rendering recipe.** `modules/diskwriter.py` is a sink: audio in, 16-bit mono WAV out at the
+  backend's sample rate, path as a parameter. Drive it headless with
+  `python -m pysynthrack --cli --patch p.json --seconds N`, from PySynthRack's own `.venv`
+  (`-=Programming=-/Python Synthesiser 2/Python Synthesizer/.venv`) — numpy/scipy/sounddevice are
+  already there. **Unverified:** whether the CLI transport needs a real output device, or whether
+  a dummy/offline backend is required on a machine with none.
+* **All four events make a sound**: your own fills, resting orders (fired + cancelled), the
+  margin-call klaxon, the black-swan stinger.
+* **Two slices.** *L1 sound design* — patches + WAVs, rendered and auditioned, nothing wired, so a
+  sound you dislike costs nothing to throw away. *L2 wiring* — playback, the Appearance ▸ Sound
+  toggle persisted via P1 exactly as P4's flash toggle is, and the TUI's terminal bell where it's
+  a one-liner.
+* **The catch to plan around:** the session doing the work can't *hear* the output. Matthew is the
+  ears; expect a render → audition → adjust loop, and prove that loop on one sound before
+  authoring all four.
 
 **P6 · Tray + toasts** (M) — minimise-to-tray, Windows toasts for fills / margin calls / black
 swans while hidden. The idle-friendly north star, delivered. **Independent of the sound
