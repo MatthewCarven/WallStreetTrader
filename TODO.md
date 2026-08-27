@@ -3,8 +3,8 @@
 Short, current, and disposable. The **full backlog lives in [`design.md` §11](design.md)**; this
 file is just "where we stopped and what to do next", so the two never drift apart.
 
-Last touched: **2026-08-23**. Local `master` is **two commits ahead of `origin/master`** —
-the TODO refresh and P4. **Push is yours to run** (`git push`).
+Last touched: **2026-08-23**. Everything through `e8ff152` is **pushed** — P4 and the P5
+decision notes. (Only this line's own commit trails it; push it whenever.)
 
 ---
 
