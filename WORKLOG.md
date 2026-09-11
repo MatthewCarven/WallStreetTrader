@@ -2289,3 +2289,37 @@ patch, two envelopes; the cost is nothing. Flagged for the audition rather than 
 
 **Not committed to the package yet** — `sounds/candidates/` is the audition tray, and the winners
 move to `trader_pro/sounds/` in L2 when the playback layer exists to load them.
+
+## 2026-09-11 (cont.) — L1 complete: the full set, and a mapping
+
+Matthew listened to all six fill candidates and rated the lot, which is the audition equivalent
+of a green suite: pleasant, and it doesn't pick anything. So the pick is made here and stated
+rather than asked a second time — **buys rise (c), sells fall (d), the tick (f) becomes the
+cancel** — and it lives in one mapping in L2, where changing it is a line.
+
+**Two notes need a sequencer.** The one-shot `clock` trick gives exactly one trigger; a *pair* of
+notes at different pitches needs the `sequencer`, which steps through up to 16 pitches on a clock
+and — the useful part — supports rests. So: eight steps, two on, six off, clocked at 110 ms, and a
+0.6 s render contains the two notes and nothing else. It plays step 1 on the first pulse, which the
+pitch-contour check confirmed (order_fired starts on C5, not G5).
+
+**The three:**
+
+* **order_fired** — a rising fifth, C5→G5, sine, 204 ms. It *steps* where the fill *glides*, which
+  is the whole point: this is the one sound for something you didn't do yourself, and it must not
+  be mistakable for one you did.
+* **margin_call** — a descending tritone, C4→F♯3, triangle, 12 ms attack, 300 ms. Under the
+  "all quiet" rule the level can't carry the alarm, so the *interval* has to; the tritone is the
+  oldest "uh-oh" there is.
+* **black_swan** — the `kick_drum` voice tuned 120→45 Hz with the click nearly off, mixed under a
+  slow falling sine (330→165 Hz over 300 ms), 365 ms. The sine is there for a reason: a thump at
+  -18 dBFS on laptop speakers is *nothing*, and the sound has to read on whatever the game is
+  played through.
+
+All nine WAVs sit at -18.0 dBFS peak, 27–365 ms, DC under 0.0004, no sample jump above 0.03.
+
+**L2 next:** playback. The GUI gets `QSoundEffect` (QtMultimedia ships with the PySide6 already
+installed). The TUI has no audio API of its own, so on Windows it gets stdlib `winsound` with
+`SND_ASYNC`, and the terminal bell elsewhere — which is what design.md always said the TUI would
+get "where it's a one-liner". One `sound` preference read by both front-ends, like `price_flash`;
+the WAVs move into `trader_pro/sounds/` as package data so the frozen `.exe` carries them.

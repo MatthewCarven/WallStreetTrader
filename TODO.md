@@ -42,12 +42,13 @@ Matthew's to run.
 ### 1. Wave B — feel (continued)
 
 **P5 · Sound** (M) — retro chirps for fills, resting orders, the margin call, the black swan.
-**L1 in progress (2026-09-11).** The pipeline is real: `scripts/render_sounds.py` renders every
-`sounds/patches/*.json` through PySynthRack's headless CLI and post-processes to -18 dBFS peak.
-**Six fill-blip candidates are in `sounds/candidates/` awaiting Matthew's ears** (a sine · b
-triangle · c rising sweep · d falling sweep · e 8-bit square · f tick). Open question raised by
-c/d: should buys rise and sells fall? Next after the verdict: the other three sounds (resting
-order, margin call, black swan), then L2 wiring. Re-render: `python scripts/render_sounds.py`.
+**L1 done (2026-09-11).** `scripts/render_sounds.py` renders every `sounds/patches/*.json`
+through PySynthRack's headless CLI and post-processes to -18 dBFS peak; the nine results are in
+`sounds/candidates/`. Matthew rated all six fill candidates, so the mapping is decided, not asked:
+**buy → fill_c_up · sell → fill_d_down · cancel → fill_f_tick · order_fired · margin_call ·
+black_swan** (a / b / e stay as alternates). **L2 next** — playback: GUI `QSoundEffect`, TUI
+`winsound` on Windows / bell elsewhere, one `sound` preference for both, WAVs into
+`trader_pro/sounds/` as package data. Re-render: `python scripts/render_sounds.py`.
 
 **Talked through 2026-08-23; settled:**
 
