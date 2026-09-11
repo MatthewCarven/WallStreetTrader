@@ -64,12 +64,20 @@ highlighted asset**, your positions, and a scrolling news log.
 | `:` | command line (every CLI command below works) |
 | `Ctrl+N` | new world — difficulty & fees are dropdowns (`↑↓` choose, `Enter` starts) |
 | `Ctrl+S` / `Ctrl+L` | save · load (the load browser lists slots with net worth, return, and age) |
+| `m` | sound on / off (toggle) |
 | `?` | help · `q` quit (autosaves first) |
 
 Board prices **flash green on an up-tick and red on a down-tick**, fading out over ~0.7s — the
 same behaviour as the desktop GUI, and governed by the same saved preference, so switching it off
 in the GUI's **Appearance ▸ Price flash** switches it off here too. (Wants a truecolour terminal;
 Windows Terminal is one.)
+
+It also **chirps** — quietly — when something happens: a rising sweep for your buys, a falling one
+for sells, a tick for a cancelled resting order, a stepped fifth when a stop/limit fires, a
+descending tritone for a margin call and a low thump for a black swan. All six sit at -18 dBFS so
+you can leave them on for an hour; `m` turns them off, and that's the same preference as the
+GUI's **Appearance ▸ Sound**. (Windows plays the WAVs via `winsound`; other platforms get the
+terminal bell.)
 
 The game **autosaves** as you play and on quit; relaunching `play_tui.py` **resumes your last
 game** automatically (press `Ctrl+N` for a fresh one). Saves live in `saves/<slot>.world` and are
@@ -102,9 +110,9 @@ ticker + top-movers, a save/load browser and a new-world dialog (**Game** menu �
 (applied the instant you pick it — panels, menus, chart frames and row highlights recolour live,
 while profit/loss and the rising/falling chart lines stay green/red — and saved beside your games
 for next launch) **and a price-flash toggle** (board prices pulse green on an up-tick, red on a
-down-tick, and fade out over ~0.7s; on by default, remembered like the accent), and a `:` command
-line that runs every
-CLI command. The window also **remembers your session**: size & position, board view + sort, chart
+down-tick, and fade out over ~0.7s; on by default, remembered like the accent), **a sound toggle**
+(the same six quiet chirps as the TUI, played through QtMultimedia, one preference for both
+front-ends), and a `:` command line that runs every CLI command. The window also **remembers your session**: size & position, board view + sort, chart
 range and speed are saved on close (to the same `settings.json` as the accent) and restored next
 launch. The keys match the TUI table above; **`Enter` or double-click** a row to trade, `?` for
 help. It resumes your last game and autosaves exactly like the TUI (they share the `saves/` slots).
@@ -211,13 +219,21 @@ trader_pro/                the Python package (engine, front-ends, save/load)
     predictions.py         buyable, seeded price forecasts
   cli.py                   the text front-end (TraderApp)
   tui.py                   the live Textual TUI
+  gui/                     the PySide6 desktop GUI (app.py, model.py, sound.py)
+  settings.py              settings.json — accent, session memory, the flash + sound toggles (both front-ends)
+  flash.py, sound.py       the price flash and the sound cues — front-end agnostic halves
+  sounds/                  the six cue WAVs (package data; rendered by scripts/render_sounds.py)
+sounds/
+  patches/                 PySynthRack patches — the re-renderable source of every cue
+  candidates/              the audition tray (alternates that didn't ship)
 data/
   sp500_constituents.csv   raw S&P 500 list (source for stock seeds)
   seeds/                   generated starting universe — stocks.json, bonds.json, crypto.json
 scripts/
   build_seed.py            regenerates the seed files (deterministic)
+  render_sounds.py         renders sounds/patches/*.json to WAVs (needs PySynthRack's venv, build-time only)
   validate_engine.py, compare_profiles.py, cascade_demo.py, …   headless validation & charts
-tests/                     175 tests across 31 files
+tests/                     240 tests across 38 files
 docs/freeze-bug/           the Textual-regression investigation
 saves/                     runtime world saves (gitignored)
 ```
@@ -239,12 +255,13 @@ comes from the simulation, not the seed.
 ## Tests
 
 ```bash
-python -m pytest          # 175 tests across 31 files
+python -m pytest          # 240 tests across 38 files
 ```
 
 Covers seed determinism, the world model, orders (market + resting stop/limit), margin/short
-behaviour, the event system, loans, predictions, profiles, persistence, GUI session memory, and
-all three front-ends. The Qt tests run offscreen in subprocesses and skip when PySide6 is absent. The two trade-dialog freeze tests are
+behaviour, the event system, loans, predictions, profiles, persistence, GUI session memory, sound
+cues, and all three front-ends. The Qt tests run offscreen in subprocesses and skip when PySide6 is
+absent. The suite is **muted** (`TRADER_PRO_MUTE`, set in `conftest.py`) so a green run is a silent one. The two trade-dialog freeze tests are
 version-gated: they pass on `textual<0.72` and `xfail` on newer releases, so an unexpected
 pass will flag that the upstream regression is fixed and the cap can be lifted.
 

@@ -34,10 +34,11 @@ from .core.engine import DAY, HOUR, WEEK
 from .core.orders import fee_rate
 from .errlog import setup_logging
 from .flash import FLASH_SECS, PriceFlash
-# The preferences file is Qt-free and lives in the gui package only for historical reasons
-# (it was written for P1). Reading it here is what makes one Appearance ▸ Price flash
-# toggle govern both front-ends instead of two settings that can disagree.
-from .gui.settings import get_setting
+from .sound import fill_cue, terminal_player
+# One preferences file for both front-ends: the GUI's Appearance ▸ Price flash / Sound toggles
+# and the TUI's `m` key read and write the same keys, so the two can never disagree. (P5 moved
+# the module up from `gui/` — it was always Qt-free.)
+from .settings import get_setting, update_settings
 from .persistence import (
     SAVES_DIR, save_game, load_game, list_saves, delete_save, slot_path,
     autosave_path, has_autosave, save_autosave, load_autosave, AUTOSAVE_SLOT,
@@ -149,6 +150,7 @@ HELP_TEXT = """[b cyan]Trader PRO — TUI help[/]
            [dim]1 Symbol · 2 Price · 3 1D% · 4 7D% · 5 31D% · 6 Pos · 7 Value · 8 Cost · 9 P&L[/]
   Enter   buy/sell dialog (add a trigger price to rest a stop/limit order)
   Ctrl+O  resting orders — view & cancel your stop/limit orders
+  m        sound on / off  (fills, fired orders, margin calls, black swans — shared with the GUI)
   +/=, -/_  buy/sell 1 unit · [b]Ctrl[/] + [b]+/=, -/_[/] buy/sell 1000
   [  ]     slower / faster   (1 min/s → 10 hr/s of sim-time per real second)
   s        step one minute      h  +1 hour      d  +1 day
@@ -424,6 +426,7 @@ class OrdersScreen(ModalScreen):
             return
         o = cancel_pending(self.app.trader.world, oid)
         if o is not None:
+            self.app.trader.cue("cancel")
             self.query_one("#orders-msg", Static).update(
                 Text(f"cancelled #{o.id}: {o.kind.value} {o.side.value} {fmt_qty(o.quantity)} "
                      f"{o.asset_id.split(':', 1)[1]} @ {money(o.trigger_price)}", style="yellow"))
@@ -784,6 +787,7 @@ class TraderTUI(App):
         ("5", "view_movers", "Movers"),
         ("o", "toggle_sort", "Sort %"),
         ("c", "chart_range", "Chart range"),
+        Binding("m", "toggle_sound", "Sound", show=False),
         # Ctrl+1..9 show/hide the nine board columns (kept off the footer to avoid clutter;
         # documented in the help panel). Ids/order must match BOARD_COLUMNS.
         Binding("ctrl+1", "toggle_column('symbol')", "Col Symbol", show=False),
@@ -828,6 +832,12 @@ class TraderTUI(App):
         self.col_visible = {cid: True for cid, _, _ in BOARD_COLUMNS}  # board columns shown (Ctrl+1..6)
         self.chart_range = 1                 # index into CHART_RANGES (default 1D)
         self.cursor_aid: str | None = None    # asset highlighted on the board (for the name line + chart)
+        # P5: sound cues. The preference is the GUI's `sound` key too; the player is winsound on
+        # Windows and the terminal bell elsewhere. TraderApp raises the cues (its own fills and
+        # cancels, one per `_advance`); trades made through our dialogs cue from their handlers.
+        self._sound_on = get_setting("sound") is not False
+        self._player = terminal_player(self.bell)
+        self.trader.on_cue = self._on_cue
         self.slot: str | None = None          # current manual save slot (Ctrl+S default)
         self.saves_dir = SAVES_DIR
         self.autosave_enabled = True
@@ -1529,6 +1539,7 @@ class TraderTUI(App):
         res = execute_order(self.trader.world, Order(aid, side, qty))
 
         if res.filled:
+            self.trader.cue(fill_cue(side))
             verb = "bought" if side == OrderSide.BUY else "sold"
             fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
             sym = aid.split(":", 1)[1]
@@ -1591,6 +1602,23 @@ class TraderTUI(App):
     def action_chart_range(self) -> None:
         self.chart_range = (self.chart_range + 1) % len(CHART_RANGES)
         self._render_chart()
+
+    def action_toggle_sound(self) -> None:
+        """`m` — sound cues on/off, persisted to the `sound` key the GUI's Appearance ▸ Sound
+        toggle also writes, so one preference governs both front-ends."""
+        if len(self.screen_stack) > 1:          # a modal owns the screen; the key isn't for us
+            return
+        self._sound_on = not self._sound_on
+        try:
+            update_settings({"sound": self._sound_on})
+        except Exception:
+            pass                                # best-effort, like autosave
+        self._log(Text(f"sound {'on' if self._sound_on else 'off'}", style="dim"))
+
+    def _on_cue(self, cue: str) -> None:
+        """TraderApp's cue sink: the preference gates, the player plays."""
+        if self._sound_on:
+            self._player.play(cue)
 
     def action_toggle_column(self, cid: str) -> None:
         """Show/hide a board column (Ctrl+1..9). Session-only -- resets to all-on next launch.
@@ -1736,6 +1764,7 @@ class TraderTUI(App):
                                f"{o.asset_id.split(':', 1)[1]} @ {money(o.trigger_price)}", style="cyan"))
             else:
                 verb, qty, sym, res = result
+                self.trader.cue(fill_cue(verb))         # P5: buys rise, sells fall
                 fee_txt = f" fee {money(res.fee)}" if getattr(res, "fee", 0) else ""
                 self._log(Text(f"{verb} {fmt_qty(qty)} {sym} @ {money(res.price)}{fee_txt} "
                                f"(P&L {res.realized_pnl:+,.2f})", style="green"))

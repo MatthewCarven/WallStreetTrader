@@ -1,8 +1,10 @@
-"""User preferences for the desktop GUI, persisted as a small JSON file.
+"""User preferences, persisted as a small JSON file — shared by both front-ends.
 
 Holds install-level trivia — the theme **accent** plus, since P1 of the polish pass, session
-memory (window geometry, board view + sort, chart range, speed). The shape is a plain dict so
-more knobs can join without a migration. Game-state knobs (e.g. the brokerage fee level) do NOT
+memory (window geometry, board view + sort, chart range, speed), and the two feel toggles the
+TUI honours too (``price_flash`` from P4b, ``sound`` from P5 — which is why this lives at the
+package root and not under ``gui/``). The shape is a plain dict so more knobs can join without
+a migration. Game-state knobs (e.g. the brokerage fee level) do NOT
 belong here: they live on ``world.config`` and travel with the save, not the install. The file
 lives beside the saves (see ``_paths.user_data_dir``), so a portable Trader PRO carries your
 preferences next to the ``.exe`` — same philosophy as the save slots.
@@ -26,7 +28,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
-from .._paths import user_data_dir
+from ._paths import user_data_dir
 
 # Historical default location; kept as a constant for reference/back-compat, but callers that
 # pass no explicit path get settings_path(), resolved at call time (env-var aware).

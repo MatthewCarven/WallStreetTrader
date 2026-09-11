@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "TraderPro"
 ENTRY = ROOT / "play_gui.py"
 SEEDS = ROOT / "data" / "seeds"
+SOUNDS = ROOT / "trader_pro" / "sounds"      # P5: the six cue WAVs, package data
 
 
 def main() -> int:
@@ -41,8 +42,10 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    # Bundle the seed universe so the frozen app finds it at resource_dir()/data/seeds.
+    # Bundle the seed universe so the frozen app finds it at resource_dir()/data/seeds — and
+    # the sound cues at resource_dir()/trader_pro/sounds (trader_pro/sound.py resolves both).
     add_data = f"{SEEDS}{os.pathsep}data/seeds"
+    add_sounds = f"{SOUNDS}{os.pathsep}trader_pro/sounds"
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean",
@@ -50,6 +53,7 @@ def main() -> int:
         "--windowed",             # GUI app - no console window
         "--name", APP_NAME,
         "--add-data", add_data,
+        "--add-data", add_sounds,
     ]
     icon = ROOT / "trader_pro.ico"
     if icon.exists():

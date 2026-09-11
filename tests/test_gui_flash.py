@@ -182,7 +182,7 @@ _FLASH = textwrap.dedent(
     from trader_pro.core import World, load_seed_universe
     from trader_pro.gui.app import TraderGUI
     from trader_pro.gui import model as M
-    from trader_pro.gui.settings import get_setting
+    from trader_pro.settings import get_setting
 
     app = QApplication.instance() or QApplication([])
     uni = load_seed_universe()

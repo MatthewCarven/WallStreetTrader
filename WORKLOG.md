@@ -2323,3 +2323,86 @@ installed). The TUI has no audio API of its own, so on Windows it gets stdlib `w
 `SND_ASYNC`, and the terminal bell elsewhere — which is what design.md always said the TUI would
 get "where it's a one-liner". One `sound` preference read by both front-ends, like `price_flash`;
 the WAVs move into `trader_pro/sounds/` as package data so the frozen `.exe` carries them.
+
+## 2026-09-11 (cont.) — P5 · L2: the chirps are wired, in both front-ends
+
+"Continue" was the whole brief, and the TODO said where: L2 playback. One probe first, because
+the GUI backend was the only thing not yet proven — `QSoundEffect` under the offscreen platform
+the tests use loads all six WAVs to `Ready` in 0.57s, says nothing on stderr, and a volume-0
+`play()` completes. So the plan from L1 held without amendment.
+
+**One seam, not four.** Every path that earns a sound already goes through `TraderApp`, or could:
+its own `_buy/_sell/_short/_cover/_cancel` for the command line (both front-ends' `:` lines run
+`trader.execute`), and `_advance` for everything the market does to you. So `TraderApp` grew one
+attribute — `on_cue: Callable[[str], None] | None` — and one method, `cue(name)`, which is a
+no-op for `None` and swallows a raising player, because a broken audio stack must not break a
+trade (there's a test that hands it a player that raises and checks the position still opened).
+The plain REPL never sets `on_cue` and stays silent without anyone thinking about it. The two
+dialogs in each front-end call `execute_order` directly, bypassing the command layer, so those
+four handlers cue themselves — `_on_filled` / `_on_trade_closed` by verb, and both orders dialogs
+on a successful cancel.
+
+**At most one cue per advance.** `sound.advance_cue(events, closures, fills)` takes the triple
+`_advance` already returns and answers with one name or `None`: a `flash_crash` event is the
+swan, any closure is the margin call, a fired order is `order_fired` if it filled and `cancel` if
+it didn't — and when several land in one advance, `PRIORITY` (swan > margin call > fired >
+cancel) picks. A crash that triggers a margin call that fires your stop-loss is one moment, not
+three chirps stacked, which is the "all quiet" rule applied to *density* rather than level. The
+mapping is `sound.CUES`, one dict, as promised: buy → `fill_c_up`, sell → `fill_d_down`, cancel →
+`fill_f_tick`, plus the three named ones. `cover` cues as a buy and `short` as a sell — the sound
+follows the cash, not the button.
+
+**Players.** Qt-free `trader_pro/sound.py` holds `WinsoundPlayer` (stdlib, `SND_ASYNC` so the UI
+never waits, `SND_NODEFAULT` so a missing file can't turn into the system beep — the one sound
+this feature must never make) and `BellPlayer`, which takes the front-end's bell callable so the
+module imports nothing from Textual. `gui/sound.py` holds `QtPlayer`: one `QSoundEffect` per cue,
+built at boot so the first fill doesn't pay the decode. All three are best-effort and log through
+`errlog`.
+
+**The settings move.** P4b's note said that if the TUI ever got a sound toggle, `gui/settings.py`
+should move up a level first. It did: `git mv` to `trader_pro/settings.py`, five import sites,
+docstring rewritten. The TUI's `m` key and the GUI's **Appearance ▸ Sound** now write the same
+`sound` key, read with the same rule as `price_flash` (on unless explicitly `false`), so the two
+front-ends can't disagree. `m` refuses while a modal is up, like the column toggles.
+
+**A muted suite.** A fill in a GUI test would otherwise *play through the developer's speakers*,
+which is the audio version of writing to the live saves dir. `conftest.py` sets `TRADER_PRO_MUTE`;
+every real player factory returns a `NullPlayer` under it, and the tests that need to see cues
+install a recorder. The one test that touches a real backend swaps `winsound` for a stub and
+asserts the call's shape. The QtMultimedia test clears the mute flag in its subprocess, builds the
+real `QtPlayer`, waits for all six `Ready`, and asserts an **empty stderr** — never calling `play`.
+
+**Package data.** The six winners `git mv`'d from `sounds/candidates/` into `trader_pro/sounds/`;
+the three alternates stay in the tray. `scripts/build_exe.py` adds the directory as a second
+`--add-data`, resolved at runtime through `resource_dir()` exactly like the seeds. Re-render the
+shipped set with `python scripts/render_sounds.py sounds/patches/<name>.json --out trader_pro/sounds`.
+
+### Tests
+
+**240 pass** (was 219). `test_sound.py` +17 (the WAVs are present, mono, under 400 ms and at
+-18 dBFS ±0.1; the mapping; `fill_cue`; `advance_cue` quiet / one-per-kind / priority; the REPL
+has no player; command-line fills and cancels cue, `cancel all` once; a fired order and a
+fire-time cancellation through the seam; margin call and swan via monkeypatched seams, swan wins;
+a raising player can't break a trade; the preference rule; muted → null; the winsound stub; the
+bell). `test_gui_sound.py` +2 (a real `TraderGUI` with a recorder: boot, dialog fills by verb,
+the command line, `_advance_now`, the orders-dialog cancel, the menu toggle gating + persisting,
+boot honouring a persisted off; and the real `QtPlayer` loading every cue with a silent stderr).
+`test_tui_sound.py` +2 (a real Textual app: quick trades by side, a fired order, the command
+line, `m` gating + persisting; and the GUI's off governing the TUI).
+
+**Thirteen mutations, thirteen catches**: `_advance` never cues · priority reversed · cover as a
+sell · GUI toggle ignored at play time · GUI toggle not persisted · GUI ignores a persisted off ·
+GUI ignores the mute flag · TUI toggle ignored at play time · TUI toggle not persisted · TUI
+ignores a persisted off · quick trade silent · `cancel all` silent · `SND_NODEFAULT` dropped.
+
+**Smoke runs, unmuted, stderr and the error logger captured:** the TUI under `run_test` with the
+real `WinsoundPlayer` — a buy, a sell, a fired order, then `m` and a silent buy — empty error log,
+`sound: false` landed in the (scratch) settings file. The GUI with the real `QtPlayer`: all six
+`Ready`, `isPlaying()` true 50 ms after a command-line buy and after a fired order, false after
+the toggle, empty error log. Both against `TRADER_PRO_SETTINGS_DIR` pointed at the scratchpad —
+the live `settings.json` was never touched.
+
+**Not done, deliberately:** the plain CLI (`play.py`) stays silent — it has no player and design.md
+never promised it one. And Matthew hasn't yet heard the cues *in context* — the smoke runs
+played three of them through his speakers, but the real audition is an hour of play with the
+toggle within reach. That's the P5 sign-off, and it's his.

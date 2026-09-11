@@ -16,6 +16,7 @@ import shlex
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 from .core import (
     load_seed_universe, World, MarketEngine, AssetKind, make_asset_id,
@@ -26,6 +27,7 @@ from .core import (
 from .core.engine import DAY, HOUR
 from .errlog import log_error, setup_logging
 from .fmt import money, fmt_qty
+from .sound import advance_cue, fill_cue
 from .persistence import (
     SAVES_DIR, AUTOSAVE_SLOT, save_game, save_autosave, load_game, slot_path, list_saves,
 )
@@ -83,6 +85,9 @@ class TraderApp:
         self.world = world or World.new(self.universe, world_seed=20260614, profile="Normal")
         self.engine = MarketEngine(self.world)
         self.running = True
+        # P5: a front-end that can make a sound hangs its player here; the plain REPL leaves it
+        # None. Every path that earns a chirp — a fill, a cancel, `_advance` — calls `cue()`.
+        self.on_cue: Callable[[str], None] | None = None
         if not self.world.portfolio.nw_history:    # seed the equity chart at the current tick
             self.world.portfolio.record_net_worth(self.world.market.tick_index, self.world.price_of)
 
@@ -93,6 +98,15 @@ class TraderApp:
         self.engine = MarketEngine(world)
         if not world.portfolio.nw_history:
             world.portfolio.record_net_worth(world.market.tick_index, world.price_of)
+
+    def cue(self, name: str | None) -> None:
+        """Play sound cue ``name`` on whatever front-end is listening — a no-op for ``None``
+        or when nobody is. Best-effort: a player that raises must not break a trade."""
+        if name and self.on_cue is not None:
+            try:
+                self.on_cue(name)
+            except Exception as exc:
+                log_error(exc, f"sound cue {name}")
 
     # ---- symbol resolution ---- #
 
@@ -335,6 +349,7 @@ class TraderApp:
             return "invalid quantity"
         res = execute_order(self.world, Order(aid, OrderSide.BUY, qty))
         if res.filled:
+            self.cue(fill_cue(OrderSide.BUY))
             fee_txt = f"  fee {money(res.fee)}" if res.fee else ""
             return col(f"bought {fmt_qty(qty)} {args[0].upper()} @ {money(res.price)} "
                        f"(−{money(-res.cash_delta)}{fee_txt})  cash {money(self.world.portfolio.cash)}", C.GREEN)
@@ -351,6 +366,7 @@ class TraderApp:
             return "invalid quantity"
         res = execute_order(self.world, Order(aid, OrderSide.SELL, qty))
         if res.filled:
+            self.cue(fill_cue(OrderSide.SELL))
             pnl = col(f"{res.realized_pnl:+,.2f}", C.GREEN if res.realized_pnl >= 0 else C.RED)
             return col(f"sold {fmt_qty(qty)} {args[0].upper()} @ {money(res.price)} "
                        f"(+{money(res.cash_delta)}) realized P&L {pnl}  "
@@ -418,6 +434,8 @@ class TraderApp:
         if args[0].lower() == "all":
             n = len(pf.pending)
             pf.pending.clear()
+            if n:
+                self.cue("cancel")
             return col(f"cancelled {n} resting order{'s' if n != 1 else ''}", C.YELLOW) if n \
                 else col("no resting orders to cancel", C.DIM)
         if not args[0].lstrip("#").isdigit():
@@ -425,6 +443,7 @@ class TraderApp:
         o = cancel_pending(self.world, int(args[0].lstrip("#")))
         if o is None:
             return col(f"no resting order #{args[0].lstrip('#')}", C.YELLOW)
+        self.cue("cancel")
         return col(f"cancelled #{o.id}: {o.kind.value} {o.side.value} {fmt_qty(o.quantity)} "
                    f"{o.asset_id.split(':', 1)[1]} @ {money(o.trigger_price)}", C.YELLOW)
 
@@ -478,6 +497,7 @@ class TraderApp:
         events = self.engine.events.fired_between(t0, t1)
         self.world.portfolio.swans_survived += sum(1 for e in events if e.kind == "flash_crash")
         closures = liquidate_for_margin(self.world)
+        self.cue(advance_cue(events, closures, fills))   # P5: at most one chirp per advance
         return events, closures, fills
 
     def _liquidation_notice(self, closures) -> str:
@@ -673,6 +693,7 @@ class TraderApp:
             return "invalid quantity"
         res = execute_order(self.world, Order(aid, OrderSide.SELL, qty))
         if res.filled:
+            self.cue(fill_cue(OrderSide.SELL))
             return col(f"shorted {fmt_qty(qty)} {args[0].upper()} @ {money(res.price)} "
                        f"(+{money(res.cash_delta)})  cash {money(self.world.portfolio.cash)}", C.YELLOW)
         return col(f"order rejected: {res.message}", C.RED)
@@ -695,6 +716,7 @@ class TraderApp:
         qty = min(qty, abs(pos.quantity))
         res = execute_order(self.world, Order(aid, OrderSide.BUY, qty))
         if res.filled:
+            self.cue(fill_cue(OrderSide.BUY))
             pnl = col(f"{res.realized_pnl:+,.2f}", C.GREEN if res.realized_pnl >= 0 else C.RED)
             return col(f"covered {fmt_qty(qty)} {args[0].upper()} @ {money(res.price)} "
                        f"realized {pnl}  cash {money(self.world.portfolio.cash)}", C.GREEN)

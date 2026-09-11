@@ -12,7 +12,7 @@ Matthew's to run.
 
 ## State right now
 
-**Wave A complete; Wave B open and now landing in both front-ends.** **219 tests pass**
+**Wave A complete; Wave B open and now landing in both front-ends.** **240 tests pass**
 (`QT_QPA_PLATFORM=offscreen python -m pytest`), working tree clean.
 
 * **P4 · Price flash (GUI)** — a Price cell tints green on an up-tick, red on a down-tick, fading
@@ -25,10 +25,15 @@ Matthew's to run.
   onto and repainting single cells with `update_cell_at`. One `price_flash` preference governs
   **both** front-ends. `tui_p4b_price_flash.svg`.
 * **`start_gui.cmd`** — the GUI has a launcher now, which is why P4 was invisible in the first place.
-* **P5 · Sound — L1 done (2026-09-11).** Nine WAVs in `sounds/candidates/`, all -18 dBFS, rendered
-  from `sounds/patches/*.json` by `scripts/render_sounds.py` through PySynthRack's headless CLI.
-  Matthew has heard them all and likes them. Mapping decided (see P5 under *Next up*).
-  **Pick up here: L2 playback wiring.**
+* **P5 · Sound — COMPLETE (2026-09-11).** L1: nine WAVs rendered at -18 dBFS from
+  `sounds/patches/*.json`, auditioned, mapping settled. L2: the six winners are package data in
+  `trader_pro/sounds/`; `trader_pro/sound.py` owns the mapping and derives **one cue per
+  advance**; `TraderApp.on_cue` is the seam every path cues through. GUI `QSoundEffect` +
+  **Appearance ▸ Sound**; TUI `winsound` / bell + `m`. One `sound` preference — `settings.py`
+  moved to the package root for it. The suite runs muted (`TRADER_PRO_MUTE`, conftest).
+  **Sign-off is Matthew's: an hour of play with the toggle in reach.** If a cue needs changing,
+  it's a line in `sound.CUES`; if one needs re-rendering, `python scripts/render_sounds.py
+  sounds/patches/<name>.json --out trader_pro/sounds`.
 
 ### Three things worth remembering from P3
 
@@ -45,46 +50,14 @@ Matthew's to run.
 
 ### 1. Wave B — feel (continued)
 
-**P5 · Sound** (M) — retro chirps for fills, resting orders, the margin call, the black swan.
-**L1 done (2026-09-11).** `scripts/render_sounds.py` renders every `sounds/patches/*.json`
-through PySynthRack's headless CLI and post-processes to -18 dBFS peak; the nine results are in
-`sounds/candidates/`. Matthew rated all six fill candidates, so the mapping is decided, not asked:
-**buy → fill_c_up · sell → fill_d_down · cancel → fill_f_tick · order_fired · margin_call ·
-black_swan** (a / b / e stay as alternates). **L2 next** — playback: GUI `QSoundEffect`, TUI
-`winsound` on Windows / bell elsewhere, one `sound` preference for both, WAVs into
-`trader_pro/sounds/` as package data. Re-render: `python scripts/render_sounds.py`.
-
-**Talked through 2026-08-23; settled:**
-
-* **PySynthRack is a build-time tool, not a dependency.** Author patches, render them to WAVs from
-  the command line, commit *both* (a chirp stays re-renderable, not a mystery binary). Trader Pro
-  gains no runtime dep: PySide6 6.11.1 already ships QtMultimedia, so `QSoundEffect` plays them.
-  This is what keeps P15's exe diet alive — a runtime PySynthRack would drag in numpy + scipy +
-  a PortAudio binary.
-* **The rendering recipe.** `modules/diskwriter.py` is a sink: audio in, 16-bit mono WAV out at the
-  backend's sample rate, path as a parameter. Drive it headless with
-  `python -m pysynthrack --cli --patch p.json --seconds N`, from PySynthRack's own `.venv`
-  (`-=Programming=-/Python Synthesiser 2/Python Synthesizer/.venv`) — numpy/scipy/sounddevice are
-  already there. **Verified 2026-09-11:** the transport runs for `--seconds` of wall-clock, and a
-  patch with a `disk_writer` and **no `speaker_output`** renders silently — nothing reaches the
-  speakers. The script refuses patches that contain one.
-* **All four events make a sound**: your own fills, resting orders (fired + cancelled), the
-  margin call, the black swan.
-* **And all of them are quiet.** Matthew's steer, and it overrides the backlog's "klaxon" and
-  "stinger" wording: the events differ in *character*, not in volume. Short, soft, low-headroom —
-  something you can leave on for an hour without reaching for the toggle. If one needs more
-  presence it earns it at the audition, not by default.
-* **Two slices.** *L1 sound design* — patches + WAVs, rendered and auditioned, nothing wired, so a
-  sound you dislike costs nothing to throw away. *L2 wiring* — playback, the Appearance ▸ Sound
-  toggle persisted via P1 exactly as P4's flash toggle is, and the TUI's terminal bell where it's
-  a one-liner.
-* **The catch to plan around:** the session doing the work can't *hear* the output. Matthew is the
-  ears; expect a render → audition → adjust loop, and prove that loop on one sound before
-  authoring all four.
+**P5 · Sound** — done; see *State right now*. The notes settled on 2026-08-23 (build-time
+PySynthRack, silent headless render, "all of them quiet", Matthew is the ears) are in
+`WORKLOG.md` under the three P5 entries dated 2026-09-11.
 
 **P6 · Tray + toasts** (M) — minimise-to-tray, Windows toasts for fills / margin calls / black
-swans while hidden. The idle-friendly north star, delivered. **Independent of the sound
-conversation** — this is the one to pick up if P5 stays parked.
+swans while hidden. The idle-friendly north star, delivered. **Next in Wave B.** The cue
+derivation P5 built (`sound.advance_cue`, one event per advance, priority-ordered) is exactly the
+"what deserves a toast" question too — reuse it rather than deriving twice.
 
 ### 2. Or jump the queue
 
@@ -131,6 +104,10 @@ is still homeless — fold it into the next slice that touches the TUI.
 * **A flash the selected row can't show.** Qt's default delegate paints the selection highlight
   over `Qt.BackgroundRole`, so the cursor row never shows its price flash. Would need a custom
   delegate; judged not worth it (P4).
+* **The suite is muted.** `conftest.py` sets `TRADER_PRO_MUTE`, so real players are never built
+  under pytest and a green run is a silent one. To see cues in a test, install a recorder on
+  `gui._player` / `app._player`. A smoke run that should actually *sound* clears the var in its
+  own process — and points `TRADER_PRO_SETTINGS_DIR` at the scratchpad first.
 * **Theming rule of thumb** (post-P2): read `THEME.accent` at *format* time, never snapshot it.
   Long-lived widgets get styled from `_style_panels()`, not inline. Modal dialogs are exempt.
 * **Pushes are Matthew's to run.** Commits from the session are fine (the top-level

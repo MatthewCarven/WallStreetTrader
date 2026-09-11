@@ -36,7 +36,9 @@ from ..core.orders import FEE_LEVELS
 from ..persistence import (
     SAVES_DIR, delete_save, list_saves, load_game, save_autosave, save_game, slot_path,
 )
-from .settings import clear_accent_color, get_setting, set_accent_color, update_settings
+from ..settings import clear_accent_color, get_setting, set_accent_color, update_settings
+from ..sound import fill_cue
+from .sound import gui_player
 from .model import (
     THEME, AMBER, AUTOSAVE_SECS, BG, BOARD_COLUMNS, CHART_RANGES, DIM, FG, FLASH_MS, GREEN,
     GREEN_HI, PANEL, POSITION_COLUMNS, PRICE_COLUMN, PriceFlash, RED, SPEEDS, TIMER_MS,
@@ -460,7 +462,8 @@ class OrdersDialog(QDialog):
         oid = item.data(Qt.UserRole) if item else None
         if oid is None:
             return
-        cancel_pending(self.trader.world, int(oid))
+        if cancel_pending(self.trader.world, int(oid)) is not None:
+            self.trader.cue("cancel")
         self._fill()
 
 
@@ -735,6 +738,7 @@ class TraderGUI(QMainWindow):
         self.speed_idx = 0                      # default: 1 sim-minute per real second
         self.autosave_enabled = True
         self.price_flash = True                 # P4: board price flash (Appearance ▸, persisted)
+        self.sound_on = True                    # P5: sound cues (Appearance ▸, persisted, shared with the TUI)
         self.slot = None                        # current manual save slot (Ctrl+S default)
         self.saves_dir = SAVES_DIR
         self._play_clock: float | None = None   # monotonic ts of last advance; None while paused
@@ -784,6 +788,12 @@ class TraderGUI(QMainWindow):
         self._flash_timer.timeout.connect(self._on_flash_timer)
         self._flash_timer.start()
 
+        # P5: the TraderApp raises cues (its own fills and cancels, and one per `_advance`);
+        # the window owns the preference and the player. Trades made through the dialogs
+        # bypass TraderApp's command layer, so those cue from the dialog handlers below.
+        self._player = gui_player(self)
+        self.trader.on_cue = self._on_cue
+
     # ---- layout ---- #
 
     def _build_ui(self) -> None:
@@ -815,6 +825,10 @@ class TraderGUI(QMainWindow):
         self.act_flash.setCheckable(True)
         self.act_flash.setChecked(self.price_flash)     # set BEFORE connecting: no boot-time toggle
         self.act_flash.toggled.connect(self.set_price_flash)
+        self.act_sound = appearance_menu.addAction("Sound")
+        self.act_sound.setCheckable(True)
+        self.act_sound.setChecked(self.sound_on)        # likewise: checked before connected
+        self.act_sound.toggled.connect(self.set_sound)
         help_act = self.menuBar().addMenu("Help").addAction("Shortcuts & commands")
         help_act.setShortcut("?")
         help_act.triggered.connect(self.show_help)
@@ -1505,6 +1519,7 @@ class TraderGUI(QMainWindow):
         self.statusBar().showMessage(text, 6000)
 
     def _on_filled(self, verb: str, qty: float, sym: str, res) -> None:
+        self.trader.cue(fill_cue(verb))             # P5: buys rise, sells fall
         self._rebuild_board()                       # holdings changed — re-pin owned rows
         self._refresh_header()
         self._refresh_chart()
@@ -1655,6 +1670,19 @@ class TraderGUI(QMainWindow):
         update_settings({"price_flash": self.price_flash})
         self.statusBar().showMessage(f"Price flash {'on' if self.price_flash else 'off'}", 3000)
 
+    @guard(context="sound toggle")
+    def set_sound(self, on: bool) -> None:
+        """Sound cues on or off — live, and remembered for next launch. The same `sound` key
+        the TUI's `m` toggle writes, so one preference governs both front-ends."""
+        self.sound_on = bool(on)
+        update_settings({"sound": self.sound_on})
+        self.statusBar().showMessage(f"Sound {'on' if self.sound_on else 'off'}", 3000)
+
+    def _on_cue(self, cue: str) -> None:
+        """TraderApp's cue sink: the preference gates, the player plays."""
+        if self.sound_on:
+            self._player.play(cue)
+
     def set_accent(self, hex_color: str | None) -> None:
         """Point the live THEME at `hex_color` (None = default) and repaint. Persistence is the
         caller's job — this is the display half, and it's what the tests drive."""
@@ -1703,8 +1731,8 @@ class TraderGUI(QMainWindow):
     # bad one silently keeps the default, per the "never crash the UI over I/O" stance.
 
     def _restore_prefs_pre(self) -> None:
-        """Speed, chart range + price flash — restored before _build_ui, which bakes them into
-        the initial labels and the Appearance menu's checkmark."""
+        """Speed, chart range, price flash + sound — restored before _build_ui, which bakes them
+        into the initial labels and the Appearance menu's checkmarks."""
         idx = get_setting("speed")
         if isinstance(idx, int) and 0 <= idx < len(SPEEDS):
             self.speed_idx = idx
@@ -1713,6 +1741,8 @@ class TraderGUI(QMainWindow):
             self.chart_range = idx
         if get_setting("price_flash") is False:     # on by default; only an explicit off is honoured
             self.price_flash = False
+        if get_setting("sound") is False:           # same rule for P5's sound cues
+            self.sound_on = False
 
     def _restore_prefs_post(self) -> None:
         """Geometry + board view + sort — these need the widgets, so run right after _build_ui."""

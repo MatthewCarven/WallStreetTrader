@@ -64,7 +64,7 @@ def accent_palette(accent: str | None) -> tuple[str, str, str]:
 def _saved_accent() -> str | None:
     """The user's saved accent colour, or None. Defensive: never raises at import time."""
     try:
-        from .settings import accent_color
+        from ..settings import accent_color
         return accent_color()
     except Exception:
         return None

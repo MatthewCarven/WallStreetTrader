@@ -18,7 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import trader_pro.gui.settings as S            # noqa: E402  (Qt-free)
+import trader_pro.settings as S            # noqa: E402  (Qt-free)
 
 if importlib.util.find_spec("PySide6") is None:
     pytest.skip("PySide6 not installed", allow_module_level=True)
@@ -30,7 +30,7 @@ _BOOT = """
     from trader_pro.cli import TraderApp
     from trader_pro.core import World, load_seed_universe
     from trader_pro.gui.app import TraderGUI
-    import trader_pro.gui.settings as S
+    import trader_pro.settings as S
 
     app = QApplication.instance() or QApplication([])
     uni = load_seed_universe()

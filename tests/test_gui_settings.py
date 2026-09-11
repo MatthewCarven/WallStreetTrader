@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import trader_pro.gui.settings as S            # noqa: E402
+import trader_pro.settings as S            # noqa: E402
 from trader_pro.gui.model import accent_palette, _scale_hex   # noqa: E402
 
 

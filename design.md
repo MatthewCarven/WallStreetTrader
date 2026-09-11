@@ -456,7 +456,8 @@ Sizes: **S** = an evening slice, **M** = a full session.
 
 **Wave A — session memory** *(foundations first: P5, P6, P12 and P14 all want settings keys)*
 
-- [ ] **P1 · Settings expansion + session restore** (M) — generic get/set in `gui/settings.py`;
+- [x] **P1 · Settings expansion + session restore** (M) — generic get/set in `gui/settings.py`
+  (now `trader_pro/settings.py` — P5 moved it up, since the TUI writes to it too);
   persist & restore window geometry, board view + sort, chart range, speed. Fee level is
   deliberately excluded — it lives in `world.config` and travels with the save, not the install.
 - [x] **P2 · Live accent repaint** (M) — the palette now lives on a mutable `THEME` object in
@@ -506,13 +507,21 @@ should reach the TUI on day one rather than as a follow-up. See P4b.)*
   same reason the GUI needed one — the 0.3s market timer stops dead when you pause or open a
   modal. One preference (`price_flash`) governs both front-ends, so the GUI's Appearance toggle
   turns the TUI's flash off too. `tui_p4b_price_flash.svg`.
-- [ ] **P5 · Sound** (M) — retro chirps for fills, resting orders, the margin call and the black
+- [x] **P5 · Sound** (M) — retro chirps for fills, resting orders, the margin call and the black
   swan. Appearance ▸ Sound toggle persisted via P1. **PySynthRack does the synthesis from the
   command line** — patches rendered to WAVs at build time and committed with them, so the runtime
   gains no dependency (PySide6 already ships QtMultimedia). **All four are quiet**: they differ in
   character, not volume — "klaxon" and "stinger" above were the wrong words, and the sound design
-  answers to the toggle you never feel the need to reach for. Splits into L1 (design + render +
-  audition) and L2 (wiring). See `TODO.md` for the recipe.
+  answers to the toggle you never feel the need to reach for. **L1** (2026-09-11): nine
+  candidates rendered at -18 dBFS by `scripts/render_sounds.py`, auditioned, mapping settled —
+  buys rise, sells fall, a cancel ticks, a fired order steps a fifth, a margin call is a tritone,
+  a black swan a thump. **L2** (2026-09-11): the six winners are package data in
+  `trader_pro/sounds/`; `trader_pro/sound.py` owns the mapping and derives **at most one cue per
+  advance** (swan > margin call > fired > cancel) from the `_advance` triple; `TraderApp.on_cue`
+  is the seam, so the command line, the dialogs and the timer all cue through one hook and the
+  plain REPL stays silent. GUI: `QSoundEffect`, **Appearance ▸ Sound**. TUI: `winsound` on
+  Windows, the bell elsewhere, `m` to toggle. One `sound` preference; `settings.py` moved to the
+  package root to make that honest. The suite runs muted (`TRADER_PRO_MUTE`).
 - [ ] **P6 · Tray + toasts** (M) — minimise-to-tray option; Windows toasts for fills / margin
   calls / black swans while hidden. The idle-friendly north star (§1), delivered.
 
