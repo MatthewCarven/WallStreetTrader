@@ -3,7 +3,7 @@
 Short, current, and disposable. The **full backlog lives in [`design.md` §11](design.md)**; this
 file is just "where we stopped and what to do next", so the two never drift apart.
 
-Last touched: **2026-08-23**. This line used to name the last pushed commit, which made it stale
+Last touched: **2026-09-11**. This line used to name the last pushed commit, which made it stale
 the moment anything else landed — twice in one session. It doesn't any more: **ask git**
 (`git status`, or `git log --oneline origin/master..HEAD` for exactly what's waiting). Pushes stay
 Matthew's to run.
@@ -25,6 +25,10 @@ Matthew's to run.
   onto and repainting single cells with `update_cell_at`. One `price_flash` preference governs
   **both** front-ends. `tui_p4b_price_flash.svg`.
 * **`start_gui.cmd`** — the GUI has a launcher now, which is why P4 was invisible in the first place.
+* **P5 · Sound — L1 done (2026-09-11).** Nine WAVs in `sounds/candidates/`, all -18 dBFS, rendered
+  from `sounds/patches/*.json` by `scripts/render_sounds.py` through PySynthRack's headless CLI.
+  Matthew has heard them all and likes them. Mapping decided (see P5 under *Next up*).
+  **Pick up here: L2 playback wiring.**
 
 ### Three things worth remembering from P3
 
