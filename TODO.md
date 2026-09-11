@@ -41,7 +41,14 @@ Matthew's to run.
 
 ### 1. Wave B — feel (continued)
 
-**P5 · Sound** (M) — retro chirps: fill, cancel, margin-call klaxon, black-swan stinger.
+**P5 · Sound** (M) — retro chirps for fills, resting orders, the margin call, the black swan.
+**L1 in progress (2026-09-11).** The pipeline is real: `scripts/render_sounds.py` renders every
+`sounds/patches/*.json` through PySynthRack's headless CLI and post-processes to -18 dBFS peak.
+**Six fill-blip candidates are in `sounds/candidates/` awaiting Matthew's ears** (a sine · b
+triangle · c rising sweep · d falling sweep · e 8-bit square · f tick). Open question raised by
+c/d: should buys rise and sells fall? Next after the verdict: the other three sounds (resting
+order, margin call, black swan), then L2 wiring. Re-render: `python scripts/render_sounds.py`.
+
 **Talked through 2026-08-23; settled:**
 
 * **PySynthRack is a build-time tool, not a dependency.** Author patches, render them to WAVs from
@@ -53,8 +60,9 @@ Matthew's to run.
   backend's sample rate, path as a parameter. Drive it headless with
   `python -m pysynthrack --cli --patch p.json --seconds N`, from PySynthRack's own `.venv`
   (`-=Programming=-/Python Synthesiser 2/Python Synthesizer/.venv`) — numpy/scipy/sounddevice are
-  already there. **Unverified:** whether the CLI transport needs a real output device, or whether
-  a dummy/offline backend is required on a machine with none.
+  already there. **Verified 2026-09-11:** the transport runs for `--seconds` of wall-clock, and a
+  patch with a `disk_writer` and **no `speaker_output`** renders silently — nothing reaches the
+  speakers. The script refuses patches that contain one.
 * **All four events make a sound**: your own fills, resting orders (fired + cancelled), the
   margin call, the black swan.
 * **And all of them are quiet.** Matthew's steer, and it overrides the backlog's "klaxon" and

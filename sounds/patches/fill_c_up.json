@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "next_id": 100,
+  "modules": [
+    {
+      "id": 1,
+      "type": "clock",
+      "name": "clock1",
+      "params": {
+        "bpm": 15.0,
+        "division": 1.0,
+        "pulse_width": 0.5
+      }
+    },
+    {
+      "id": 2,
+      "type": "ad_envelope",
+      "name": "ad_envelope2",
+      "params": {
+        "attack": 0.005,
+        "decay": 0.09
+      }
+    },
+    {
+      "id": 5,
+      "type": "ad_envelope",
+      "name": "ad_envelope5",
+      "params": {
+        "attack": 0.09,
+        "decay": 1.0
+      }
+    },
+    {
+      "id": 3,
+      "type": "oscillator",
+      "name": "oscillator3",
+      "params": {
+        "waveform": "sine",
+        "freq": 440.0,
+        "amp": 0.6
+      }
+    },
+    {
+      "id": 4,
+      "type": "vca",
+      "name": "vca4",
+      "params": {
+        "gain": 1.0
+      }
+    },
+    {
+      "id": 99,
+      "type": "disk_writer",
+      "name": "Disk",
+      "params": {
+        "path": "RENDERED_BY_scripts_render_sounds.py.wav",
+        "armed": true
+      }
+    }
+  ],
+  "cables": [
+    {
+      "src_module_id": 1,
+      "src_port": "out",
+      "dst_module_id": 2,
+      "dst_port": "trig"
+    },
+    {
+      "src_module_id": 1,
+      "src_port": "out",
+      "dst_module_id": 5,
+      "dst_port": "trig"
+    },
+    {
+      "src_module_id": 5,
+      "src_port": "cv",
+      "dst_module_id": 3,
+      "dst_port": "freq_cv"
+    },
+    {
+      "src_module_id": 3,
+      "src_port": "out",
+      "dst_module_id": 4,
+      "dst_port": "audio"
+    },
+    {
+      "src_module_id": 2,
+      "src_port": "cv",
+      "dst_module_id": 4,
+      "dst_port": "cv"
+    },
+    {
+      "src_module_id": 4,
+      "src_port": "out",
+      "dst_module_id": 99,
+      "dst_port": "in"
+    }
+  ]
+}

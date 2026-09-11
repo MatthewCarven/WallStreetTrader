@@ -2250,3 +2250,42 @@ with no tint at all and looked like a bug in the feature; it was a bug in the me
 `_advance` + `_refresh` directly and hand `_paint_flashes` an explicit `now` — the same clock
 injection the unit tests use. Also: **`cairosvg` isn't installed locally**, so this slice has an
 SVG screenshot and no PNG.
+
+## 2026-09-11 — P5 · L1 opens: the render pipeline works, six fill-blip candidates out for audition
+
+Matthew's go was one sentence — PySynthRack has a command-line mode, use its disk writer to make
+WAVs for Trader Pro — which is the plan we'd already settled, so this went straight to the probe.
+
+**The probe, and the thing it was for.** The one unverified item was whether PySynthRack's headless
+transport needed a real output device (and, worse, whether it would play the render out loud).
+Answer: it runs the numpy backend against the audio callback for `--seconds` of *wall-clock*, and
+a patch with a `disk_writer` sink and **no `speaker_output`** sends nothing to the device — silent
+render, WAV on disk, exit 0. So rendering a sound takes as long as the sound plus the trailing
+silence, and nobody hears it. `scripts/render_sounds.py` refuses a patch containing a
+`speaker_output` for exactly that reason.
+
+**One-shot triggering with no hands.** The example blip patches use a `keyboard` module for the
+gate, which headless means nothing ever fires. A `clock` at 15 BPM / division 1 is one pulse every
+four seconds with the first at t=0 — rendered for 0.6s, that is precisely one trigger.
+
+**Where the responsibilities sit.** Character lives in the patch — waveform, pitch, envelope,
+filter, the things PySynthRack's UI can edit. Loudness and length are enforced by the script,
+identically for every sound: trim to the audible region, a 4ms fade so the cut can't click,
+normalise the peak to **-18 dBFS**. "All of them quiet" is thereby one constant, checked by
+`--analyse`, not a hope; retune it and every sound follows. The committed patches carry a
+placeholder `disk_writer` path that the script overwrites at render time, so no developer's
+absolute path ever lands in git.
+
+**Six candidates for the fill**, all -18 dBFS, 27–94 ms audible, zero DC, no sample jump above
+0.03: **a** plain sine 880 Hz · **b** triangle 660 Hz · **c** a rising octave sweep (a pitch
+AD-envelope with a 90 ms attack into the oscillator's 1V/oct `freq_cv`) · **d** the falling mirror
+(1 ms attack, 90 ms decay) · **e** a square through a resonant lowpass, the 8-bit one · **f** a
+27 ms tick at 1320 Hz, barely a note. The sweeps were checked to actually sweep (c: 476→861 Hz,
+d: 820→452 Hz) rather than sit on a static tone — the first render of a modulated patch is exactly
+where a mis-cabled port would show up as a plausible-looking WAV.
+
+**c and d raise a question that wasn't in the brief**: buys could rise and sells could fall. One
+patch, two envelopes; the cost is nothing. Flagged for the audition rather than decided.
+
+**Not committed to the package yet** — `sounds/candidates/` is the audition tray, and the winners
+move to `trader_pro/sounds/` in L2 when the playback layer exists to load them.
