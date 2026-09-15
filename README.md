@@ -112,9 +112,13 @@ while profit/loss and the rising/falling chart lines stay green/red — and save
 for next launch) **and a price-flash toggle** (board prices pulse green on an up-tick, red on a
 down-tick, and fade out over ~0.7s; on by default, remembered like the accent), **a sound toggle**
 (the same six quiet chirps as the TUI, played through QtMultimedia, one preference for both
-front-ends), and a `:` command line that runs every CLI command. The window also **remembers your session**: size & position, board view + sort, chart
-range and speed are saved on close (to the same `settings.json` as the accent) and restored next
-launch. The keys match the TUI table above; **`Enter` or double-click** a row to trade, `?` for
+front-ends), a **Window** menu with **minimise to tray** (off by default; when on, minimising
+parks the game behind a `$` tray icon and the market keeps ticking — a resting order that fires,
+a margin call or a black swan reaches you as a **Windows toast**, one per advance, and the tray
+icon's hover text is a tiny HUD: clock, net worth, playing/paused; `Ctrl+H` hides to the tray
+regardless; closing always quits), and a `:` command line that runs every CLI command. The window
+also **remembers your session**: size & position, board view + sort, chart range and speed are
+saved on close (to the same `settings.json` as the accent) and restored next launch. The keys match the TUI table above; **`Enter` or double-click** a row to trade, `?` for
 help. It resumes your last game and autosaves exactly like the TUI (they share the `saves/` slots).
 
 > **Never-crash policy.** Every GUI action (and the live market tick) is wrapped so an unexpected
@@ -233,7 +237,7 @@ scripts/
   build_seed.py            regenerates the seed files (deterministic)
   render_sounds.py         renders sounds/patches/*.json to WAVs (needs PySynthRack's venv, build-time only)
   validate_engine.py, compare_profiles.py, cascade_demo.py, …   headless validation & charts
-tests/                     240 tests across 38 files
+tests/                     244 tests across 39 files
 docs/freeze-bug/           the Textual-regression investigation
 saves/                     runtime world saves (gitignored)
 ```
@@ -255,12 +259,12 @@ comes from the simulation, not the seed.
 ## Tests
 
 ```bash
-python -m pytest          # 240 tests across 38 files
+python -m pytest          # 244 tests across 39 files
 ```
 
 Covers seed determinism, the world model, orders (market + resting stop/limit), margin/short
 behaviour, the event system, loans, predictions, profiles, persistence, GUI session memory, sound
-cues, and all three front-ends. The Qt tests run offscreen in subprocesses and skip when PySide6 is
+cues, the tray + toasts, and all three front-ends. The Qt tests run offscreen in subprocesses and skip when PySide6 is
 absent. The suite is **muted** (`TRADER_PRO_MUTE`, set in `conftest.py`) so a green run is a silent one. The two trade-dialog freeze tests are
 version-gated: they pass on `textual<0.72` and `xfail` on newer releases, so an unexpected
 pass will flag that the upstream regression is fixed and the cap can be lifted.

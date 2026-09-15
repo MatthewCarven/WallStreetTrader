@@ -17,13 +17,13 @@ import sys
 import time
 
 import pyqtgraph as pg
-from PySide6.QtCore import QAbstractTableModel, QByteArray, QModelIndex, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QShortcut
+from PySide6.QtCore import QAbstractTableModel, QByteArray, QEvent, QModelIndex, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSplitter,
-    QTableView, QVBoxLayout, QWidget,
+    QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
+    QSystemTrayIcon, QTableView, QVBoxLayout, QWidget,
 )
 
 from ..cli import TraderApp, fmt_clock, money, fmt_qty
@@ -44,7 +44,7 @@ from .model import (
     GREEN_HI, PANEL, POSITION_COLUMNS, PRICE_COLUMN, PriceFlash, RED, SPEEDS, TIMER_MS,
     asset_detail_html, boot, cell,
     closure_entry, default_watchlist, event_entry, fill_entry, header_html, kind_ids,
-    margin_call_message, pending_fill_entry,
+    margin_call_message, pending_fill_entry, toast_for,
     margin_color, margin_fill, movers_ids, position_rows, prediction_summary, row_ctx,
     row_background, save_info_line, steps_for, ticker_text, trade_quantity, visible_ids,
 )
@@ -724,6 +724,27 @@ class HelpDialog(QDialog):
         )
 
 
+TOAST_MS = 6000       # how long a tray toast asks to stay up (the OS has the final say)
+
+
+def tray_icon(size: int = 64) -> QIcon:
+    """The tray / taskbar icon, painted rather than shipped: a bold ``$`` in the live accent on
+    the terminal's dark ground. Re-painted on an accent change, so the tray follows the theme."""
+    pm = QPixmap(size, size)
+    pm.fill(QColor(BG))
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(QColor(THEME.accent))
+    font = QFont("Consolas")
+    font.setStyleHint(QFont.Monospace)
+    font.setBold(True)
+    font.setPixelSize(int(size * 0.7))
+    painter.setFont(font)
+    painter.drawText(pm.rect(), Qt.AlignCenter, "$")
+    painter.end()
+    return QIcon(pm)
+
+
 class TraderGUI(QMainWindow):
     """The main window: header, time controls, the live market board, chart/equity/detail,
     positions, news & ticker. Holds a `TraderApp` and advances it on a QTimer, exactly as the
@@ -739,6 +760,9 @@ class TraderGUI(QMainWindow):
         self.autosave_enabled = True
         self.price_flash = True                 # P4: board price flash (Appearance ▸, persisted)
         self.sound_on = True                    # P5: sound cues (Appearance ▸, persisted, shared with the TUI)
+        self.tray_mode = False                  # P6: minimise to tray + toasts while hidden (Window ▸, persisted)
+        self._in_tray = False                   # window currently hidden behind the tray icon
+        self._deferred_margin_call = None       # closures whose popup waits for the window to come back
         self.slot = None                        # current manual save slot (Ctrl+S default)
         self.saves_dir = SAVES_DIR
         self._play_clock: float | None = None   # monotonic ts of last advance; None while paused
@@ -794,6 +818,13 @@ class TraderGUI(QMainWindow):
         self._player = gui_player(self)
         self.trader.on_cue = self._on_cue
 
+        # P6: the tray icon exists from boot (so the Window menu can flip it on live) but is only
+        # *shown* while the option is on — no tray clutter for anyone who never asked for it.
+        self.setWindowIcon(tray_icon())
+        self._tray = self._build_tray()
+        if self.tray_mode:
+            self._tray.show()
+
     # ---- layout ---- #
 
     def _build_ui(self) -> None:
@@ -829,6 +860,14 @@ class TraderGUI(QMainWindow):
         self.act_sound.setCheckable(True)
         self.act_sound.setChecked(self.sound_on)        # likewise: checked before connected
         self.act_sound.toggled.connect(self.set_sound)
+        window_menu = self.menuBar().addMenu("Window")
+        self.act_tray = window_menu.addAction("Minimise to tray (notifications while hidden)")
+        self.act_tray.setCheckable(True)
+        self.act_tray.setChecked(self.tray_mode)        # likewise: checked before connected
+        self.act_tray.toggled.connect(self.set_tray_mode)
+        self.act_hide = window_menu.addAction("Hide to tray now")
+        self.act_hide.setShortcut("Ctrl+H")
+        self.act_hide.triggered.connect(self.action_hide_to_tray)
         help_act = self.menuBar().addMenu("Help").addAction("Shortcuts & commands")
         help_act.setShortcut("?")
         help_act.triggered.connect(self.show_help)
@@ -1221,6 +1260,7 @@ class TraderGUI(QMainWindow):
         self._refresh_equity()
         self._refresh_positions()
         self._log_news(events, closures, fills)
+        self._maybe_toast(events, closures, fills)
         if closures:
             self._notify_margin_call(closures)
 
@@ -1247,6 +1287,7 @@ class TraderGUI(QMainWindow):
         self._refresh_equity()
         self._refresh_positions()
         self._log_news(events, closures, fills)
+        self._maybe_toast(events, closures, fills)
         if self.autosave_enabled and now - self._last_autosave >= AUTOSAVE_SECS:
             self._autosave()
             self._last_autosave = now
@@ -1260,6 +1301,8 @@ class TraderGUI(QMainWindow):
 
     def _refresh_header(self) -> None:
         self.header_label.setText(header_html(self.trader.world))
+        if self._in_tray:                           # P6: the hover text is the whole HUD out there
+            self._tray.setToolTip(self._tray_tooltip())
         if self.margin_meter is not None:
             self.margin_meter.set_fill(margin_fill(self.trader.world))
         self._build_ticker()
@@ -1533,6 +1576,9 @@ class TraderGUI(QMainWindow):
     def _notify_margin_call(self, closures) -> None:
         if self.playing:                            # a margin call is a stop-and-look moment
             self.toggle_play()
+        if self._in_tray:                           # P6: the toast said it; the box waits for you
+            self._deferred_margin_call = closures
+            return
         QMessageBox.warning(self, "⚠  Margin Call", margin_call_message(closures))
 
     # ---- save / load / new world ---- #
@@ -1683,11 +1729,146 @@ class TraderGUI(QMainWindow):
         if self.sound_on:
             self._player.play(cue)
 
+    # ---- tray + toasts (P6) ---- #
+    #
+    # The idle-friendly north star (design.md §1) delivered: minimise, and the market keeps
+    # ticking behind a tray icon; the things worth interrupting you for — a resting order that
+    # fired, a margin call, a black swan — arrive as toasts, picked by the very same
+    # one-per-advance judgement P5's sounds use (model.toast_for → sound.advance_cue). Close
+    # still quits: the tray is somewhere the window *goes*, never somewhere it gets stuck.
+
+    def _build_tray(self) -> QSystemTrayIcon:
+        tray = QSystemTrayIcon(tray_icon(), self)
+        tray.setToolTip("TRADER PRO")
+        menu = QMenu(self)
+        self._tray_show_act = menu.addAction("Show TRADER PRO")
+        self._tray_show_act.triggered.connect(self._restore_from_tray)
+        self._tray_play_act = menu.addAction("Pause")
+        self._tray_play_act.triggered.connect(self.toggle_play)
+        menu.addSeparator()
+        menu.addAction("Quit").triggered.connect(self.action_quit)
+        menu.aboutToShow.connect(self._sync_tray_menu)
+        tray.setContextMenu(menu)
+        tray.activated.connect(self._on_tray_activated)
+        tray.messageClicked.connect(self._restore_from_tray)
+        return tray
+
+    def _tray_usable(self) -> bool:
+        """Whether hiding behind the tray is safe *here*: no tray means no way back, so on a
+        desktop without one the minimise button stays a minimise button."""
+        return QSystemTrayIcon.isSystemTrayAvailable()
+
+    def _tray_tooltip(self) -> str:
+        w = self.trader.world
+        state = f"playing · {SPEEDS[self.speed_idx][0]}" if self.playing else "paused"
+        return (f"TRADER PRO · {fmt_clock(w.market.tick_index)}\n"
+                f"net worth {money(w.portfolio.net_worth(w.price_of))} · {state}")
+
+    def _sync_tray_menu(self) -> None:
+        self._tray_play_act.setText("Pause" if self.playing else "Play")
+
+    @guard(context="tray toggle")
+    def set_tray_mode(self, on: bool) -> None:
+        """Window ▸ Minimise to tray — live, and remembered for next launch."""
+        self.tray_mode = bool(on)
+        update_settings({"tray": self.tray_mode})
+        if self.tray_mode:
+            self._tray.show()
+            if self._tray_usable():
+                note = "Minimise to tray on"
+            else:
+                note = ("Minimise to tray on — but this desktop has no system tray, "
+                        "so minimise stays minimise")
+        else:
+            if self._in_tray:                       # never strand a hidden window
+                self._restore_from_tray()
+            self._tray.hide()
+            note = "Minimise to tray off"
+        self.statusBar().showMessage(note, 4000)
+
+    @guard(context="hide to tray")
+    def action_hide_to_tray(self) -> None:
+        """Window ▸ Hide to tray now (Ctrl+H) — works whether or not minimise is wired to it."""
+        if not self._tray_usable():
+            self.statusBar().showMessage("No system tray on this desktop", 4000)
+            return
+        self._hide_to_tray()
+
+    def changeEvent(self, event) -> None:      # noqa: N802 — Qt override name
+        super().changeEvent(event)
+        if (event.type() == QEvent.Type.WindowStateChange and self.isMinimized()
+                and self.tray_mode and self._tray_usable()):
+            # Hiding from inside the state-change handler is the documented no-no; let the
+            # event finish, then go.
+            QTimer.singleShot(0, self._hide_to_tray)
+
+    def _hide_to_tray(self) -> None:
+        if self._in_tray:
+            return
+        self._tray.show()                           # even when the option is off (Ctrl+H)
+        self._tray.setToolTip(self._tray_tooltip())
+        self._in_tray = True
+        app = QApplication.instance()
+        if app is not None:
+            app.setQuitOnLastWindowClosed(False)    # a hidden main window is not a closed one
+        self.hide()
+
+    def _restore_from_tray(self) -> None:
+        if not self._in_tray and self.isVisible():
+            self.activateWindow()
+            self.raise_()
+            return
+        self._in_tray = False
+        app = QApplication.instance()
+        if app is not None:
+            app.setQuitOnLastWindowClosed(True)
+        self.setWindowState((self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
+        self.show()
+        self.activateWindow()
+        self.raise_()
+        if not self.tray_mode:
+            self._tray.hide()
+        self._tray.setToolTip("TRADER PRO")
+        closures, self._deferred_margin_call = self._deferred_margin_call, None
+        if closures:                                # the stop-and-look moment, now that you can look
+            QMessageBox.warning(self, "⚠  Margin Call", margin_call_message(closures))
+
+    def _on_tray_activated(self, reason) -> None:
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                      QSystemTrayIcon.ActivationReason.DoubleClick):
+            self._restore_from_tray()
+
+    def _maybe_toast(self, events, closures, fills) -> None:
+        """One toast per advance, only while hidden — the window itself is the notification
+        when it's on screen."""
+        if not self._in_tray:
+            return
+        toast = toast_for(events, closures, fills)
+        if toast is None:
+            return
+        title, body = toast
+        icon = (QSystemTrayIcon.MessageIcon.Warning if title.startswith("⚠")
+                else QSystemTrayIcon.MessageIcon.Information)
+        self._tray.showMessage(title, body, icon, TOAST_MS)
+
+    @guard(context="quit")
+    def action_quit(self) -> None:
+        """Quit from the tray menu: the normal close (autosave + prefs), then end the loop —
+        explicitly, because a hidden window's close doesn't count as the last window closing."""
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     def set_accent(self, hex_color: str | None) -> None:
         """Point the live THEME at `hex_color` (None = default) and repaint. Persistence is the
         caller's job — this is the display half, and it's what the tests drive."""
         THEME.set(hex_color)
         self._restyle_theme()
+        if getattr(self, "_tray", None) is not None:
+            icon = tray_icon()
+            self._tray.setIcon(icon)
+            self.setWindowIcon(icon)
 
     def show_help(self) -> None:
         HelpDialog(self).exec()
@@ -1731,8 +1912,8 @@ class TraderGUI(QMainWindow):
     # bad one silently keeps the default, per the "never crash the UI over I/O" stance.
 
     def _restore_prefs_pre(self) -> None:
-        """Speed, chart range, price flash + sound — restored before _build_ui, which bakes them
-        into the initial labels and the Appearance menu's checkmarks."""
+        """Speed, chart range, price flash, sound + tray — restored before _build_ui, which bakes
+        them into the initial labels and the menus' checkmarks."""
         idx = get_setting("speed")
         if isinstance(idx, int) and 0 <= idx < len(SPEEDS):
             self.speed_idx = idx
@@ -1743,6 +1924,8 @@ class TraderGUI(QMainWindow):
             self.price_flash = False
         if get_setting("sound") is False:           # same rule for P5's sound cues
             self.sound_on = False
+        if get_setting("tray") is True:             # off by default; only an explicit on is honoured
+            self.tray_mode = True
 
     def _restore_prefs_post(self) -> None:
         """Geometry + board view + sort — these need the widgets, so run right after _build_ui."""

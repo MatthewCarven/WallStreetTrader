@@ -569,6 +569,36 @@ def pending_fill_entry(res) -> tuple:
     return (f"◇ {res.message} ({sym})", AMBER)
 
 
+def toast_for(events, closures, fills) -> tuple[str, str] | None:
+    """(title, body) for the one toast an advance earns while the window sits in the tray — or
+    None for a quiet advance. **The pick is the sound's pick**: `sound.advance_cue` already
+    answers "what is the most consequential thing that just happened" with one name per advance,
+    priority-ordered (black swan > margin call > fired order > cancelled order), so P6 reuses it
+    rather than deriving the same judgement twice. Only the wording is new here.
+
+    Bodies reuse the news-feed phrasing (`pending_fill_entry` etc.) so what the toast said is what
+    the feed shows when the window comes back."""
+    from ..sound import advance_cue
+    cue = advance_cue(events, closures, fills)
+    if cue is None:
+        return None
+    if cue == "black_swan":
+        swans = [e for e in events if getattr(e, "kind", None) == "flash_crash"]
+        return ("⚠  Black swan", swans[0].headline if swans else "A flash crash hit the market.")
+    if cue == "margin_call":
+        closures = list(closures)
+        syms = sorted({c.order.asset_id.split(":", 1)[1] for c in closures})
+        n = len(closures)
+        return ("⚠  Margin call",
+                f"The broker force-closed {n} position{'s' if n != 1 else ''}: {', '.join(syms)}. "
+                f"Play is paused.")
+    fired = [r for r in fills if r.filled] if cue == "order_fired" else [r for r in fills if not r.filled]
+    text = pending_fill_entry(fired[0])[0].lstrip("◆◇ ")
+    if len(fired) > 1:
+        text += f"  (+{len(fired) - 1} more)"
+    return ("Resting order filled" if cue == "order_fired" else "Resting order cancelled", text)
+
+
 def save_info_line(info) -> str:
     """One-line summary of a save slot (persistence.SaveInfo) for the load browser."""
     tag = "  (autosave)" if info.is_autosave else ""

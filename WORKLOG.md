@@ -2406,3 +2406,79 @@ the live `settings.json` was never touched.
 never promised it one. And Matthew hasn't yet heard the cues *in context* — the smoke runs
 played three of them through his speakers, but the real audition is an hour of play with the
 toggle within reach. That's the P5 sign-off, and it's his.
+
+## 2026-09-15 — P6 · Tray + toasts: the idle-friendly north star, delivered
+
+"P6 please." Two probes before a line of feature code, because the tray is the one Qt surface
+this project hadn't touched: under the **offscreen** platform the tests use, `QSystemTrayIcon`
+constructs and even reports `show()` as visible, but `isSystemTrayAvailable()` is False and
+`supportsMessages()` is False — so the wiring tests would need a stub. On the **real** platform
+both are True and `showMessage` produced a native Windows toast. Qt's own mechanism, then; no
+`win10toast`, no WinRT bindings, no new dependency.
+
+**Three calls, made and stated rather than asked.** *Minimise* goes to the tray when the option
+is on; *close still quits* — the tray is somewhere the window goes, never somewhere it gets
+stuck, and "how do I exit this thing" is the classic tray-app failure. The option defaults
+**off** (a window that vanishes on minimise is a surprise you should have to opt into). And the
+toasts come *with* the option rather than getting a toggle of their own: they only ever fire
+while the window is actually hidden, so a user who never minimises never sees one.
+
+**The pick is the sound's pick.** design.md's wording was "toasts for fills / margin calls /
+black swans while hidden", which is the same list P5 already reduced to one judgement:
+`sound.advance_cue(events, closures, fills)` → one name per advance, priority-ordered. So
+`model.toast_for` calls it and only adds words — the black swan's headline, "the broker
+force-closed N positions: SYM, SYM. Play is paused.", or the news-feed line for a resting order
+(with "+N more" if several fired at once). One judgement, two outputs; the test pins them to
+each other across seven combinations. A mutation that reverses the shared priority therefore
+escapes *this* file by design and is caught by `test_sound.py`, which is the right place.
+
+**What the window does.** A `Window` menu: *Minimise to tray (notifications while hidden)*,
+checkable, persisted as `tray`; *Hide to tray now* (`Ctrl+H`), which works regardless of the
+option. `changeEvent` watches for the minimised state and — deferred through
+`QTimer.singleShot(0)`, since hiding from inside the state-change handler is the documented
+no-no — hides the window, shows the icon, and flips `setQuitOnLastWindowClosed(False)` so a hidden
+main window isn't mistaken for a closed one. The tray icon's tooltip becomes a tiny HUD (clock,
+net worth, playing/paused), refreshed from `_refresh_header` while hidden. Its menu is Show /
+Play-Pause (relabelled on `aboutToShow`) / Quit, and a click or a clicked toast restores. Quit
+from the tray runs the normal close (autosave + prefs) and then `app.quit()` explicitly.
+
+**A margin call while hidden** still pauses — that rule predates P6 — and toasts as a warning;
+the `QMessageBox` is *deferred* until the window comes back, because a modal over a hidden
+window is a box nobody can see holding a game nobody can reach. Switching the option off while
+hidden restores first, so a window is never stranded with its icon gone.
+
+**The icon is painted, not shipped**: a bold `$` in the live accent on the terminal's dark
+ground, re-painted on an accent change so the tray follows the theme. It's also the window icon
+now, so the taskbar shows something other than the generic Python feather. P15 wants a
+candlestick — same trick, different drawing.
+
+### Tests
+
+**244 pass** (was 240). `test_gui_tray.py` +4: three pure (`toast_for` quiet when the sound
+would be; makes `advance_cue`'s pick across seven combinations; bodies read like the news feed
+and carry "+N more") and one subprocess scenario with `_tray_usable` forced True and the icon
+swapped for a recorder: boot with the option off and the icon hidden · the toggle shows the icon
+and persists · a real `showMinimized()` stays a plain minimise while off and goes to the tray
+while on (the `changeEvent` path, verified offscreen) · `quitOnLastWindowClosed` flips · the
+tooltip carries net worth · two resting orders fire in one advance → one toast with "+1 more" ·
+a quiet advance → nothing · the **timer path** toasts too · a margin call while hidden toasts as a
+warning, pauses, and pops no box · restore brings the window back, pops the deferred box once,
+and stops the toasts · `Ctrl+H` works with the option off and the icon goes when the window
+returns · switching the option off un-strands a hidden window · boot honours a persisted on ·
+an accent change repaints the icon · tray Quit runs the close path (prefs written) then quits.
+
+**Fourteen mutations, thirteen catches** — the fourteenth (priority reversed) escapes here by
+design and is caught in `test_sound.py`. The one that mattered: the first sweep showed the
+**timer** path had never been driven while hidden, only manual advances; the test grew, and the
+mutation that drops `_maybe_toast` from `_on_timer` is now caught.
+
+**Smoke, on the real platform, error logger captured, scratch settings dir:** tray available;
+option on → icon visible and `tray: true` written; `showMinimized()` → hidden, tooltip
+`TRADER PRO · D0 00:00 / net worth $100,000.00 · paused`; a resting limit fired on the next
+advance → a real Windows toast, "Resting order filled"; restore → visible, not minimised; option
+off → icon gone; close; empty error log. `gui_p6_tray.png` is the window with the new menu and
+the status note.
+
+**Known, not fixed:** the toast is attributed to the Python interpreter (a Windows toast is
+signed by the AppUserModelID of the process, and `python.exe` has its own). That resolves itself
+the day the exe has an identity — P15 — and isn't worth a WinRT dependency before then.

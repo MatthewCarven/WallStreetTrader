@@ -522,8 +522,20 @@ should reach the TUI on day one rather than as a follow-up. See P4b.)*
   plain REPL stays silent. GUI: `QSoundEffect`, **Appearance ▸ Sound**. TUI: `winsound` on
   Windows, the bell elsewhere, `m` to toggle. One `sound` preference; `settings.py` moved to the
   package root to make that honest. The suite runs muted (`TRADER_PRO_MUTE`).
-- [ ] **P6 · Tray + toasts** (M) — minimise-to-tray option; Windows toasts for fills / margin
-  calls / black swans while hidden. The idle-friendly north star (§1), delivered.
+- [x] **P6 · Tray + toasts** (M) — minimise-to-tray option; Windows toasts for fills / margin
+  calls / black swans while hidden. The idle-friendly north star (§1), delivered (2026-09-15).
+  **Window ▸ Minimise to tray**, off by default and persisted (`tray`): while on, minimising
+  hides the window behind a painted `$` tray icon (accent-coloured, repainted with the theme) and
+  the market timer keeps running; `Ctrl+H` hides regardless of the option; **close still quits**
+  — the tray is somewhere the window goes, never somewhere it gets stuck. Toasts are Qt's own
+  `QSystemTrayIcon.showMessage` (native on Windows 10/11; no new dependency), fire **only while
+  hidden**, and **make the sound's pick**: `model.toast_for` calls `sound.advance_cue`, so "what
+  deserves a toast" is the one-per-advance, priority-ordered judgement P5 already made — only the
+  wording is new, and it reuses the news-feed phrasing. A margin call while hidden still pauses;
+  its popup is deferred until the window comes back, so nothing modal ever pops over nothing.
+  Switching the option off restores a hidden window rather than stranding it. The tray menu is
+  Show / Play-Pause / Quit. Offscreen has no tray, so the tests stub the icon and force
+  `_tray_usable()`. `gui_p6_tray.png`.
 
 **Wave C — trader QoL** *(engine + all three front-ends, exactly like the L slices)*
 

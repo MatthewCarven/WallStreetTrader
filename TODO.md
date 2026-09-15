@@ -3,7 +3,7 @@
 Short, current, and disposable. The **full backlog lives in [`design.md` §11](design.md)**; this
 file is just "where we stopped and what to do next", so the two never drift apart.
 
-Last touched: **2026-09-11**. This line used to name the last pushed commit, which made it stale
+Last touched: **2026-09-15**. This line used to name the last pushed commit, which made it stale
 the moment anything else landed — twice in one session. It doesn't any more: **ask git**
 (`git status`, or `git log --oneline origin/master..HEAD` for exactly what's waiting). Pushes stay
 Matthew's to run.
@@ -12,8 +12,8 @@ Matthew's to run.
 
 ## State right now
 
-**Wave A complete; Wave B open and now landing in both front-ends.** **240 tests pass**
-(`QT_QPA_PLATFORM=offscreen python -m pytest`), working tree clean.
+**Waves A and B complete.** **244 tests pass** (`QT_QPA_PLATFORM=offscreen python -m pytest`),
+working tree clean.
 
 * **P4 · Price flash (GUI)** — a Price cell tints green on an up-tick, red on a down-tick, fading
   over 0.7s. Quiet by design: it compares against the last price it *displayed*, so first
@@ -34,6 +34,14 @@ Matthew's to run.
   **Sign-off is Matthew's: an hour of play with the toggle in reach.** If a cue needs changing,
   it's a line in `sound.CUES`; if one needs re-rendering, `python scripts/render_sounds.py
   sounds/patches/<name>.json --out trader_pro/sounds`.
+* **P6 · Tray + toasts — COMPLETE (2026-09-15).** **Window ▸ Minimise to tray** (off by default,
+  `tray` pref): minimising parks the window behind a painted `$` tray icon and the market keeps
+  ticking; toasts are Qt's own `QSystemTrayIcon.showMessage`, fire only while hidden, and make
+  **the sound's pick** (`model.toast_for` → `sound.advance_cue`, one per advance). A margin call
+  while hidden pauses and toasts; its popup waits for the window. `Ctrl+H` hides regardless;
+  close still quits; the tray menu is Show / Play-Pause / Quit. `gui_p6_tray.png`. **Matthew to
+  try in anger**: turn it on, minimise, rest a stop, walk away — the toast attribution reads as
+  the Python interpreter's until P15 gives the exe an identity of its own.
 
 ### Three things worth remembering from P3
 
@@ -48,21 +56,28 @@ Matthew's to run.
 
 ## Next up
 
-### 1. Wave B — feel (continued)
+### 1. Wave C — trader QoL
 
-**P5 · Sound** — done; see *State right now*. The notes settled on 2026-08-23 (build-time
-PySynthRack, silent headless render, "all of them quiet", Matthew is the ears) are in
-`WORKLOG.md` under the three P5 entries dated 2026-09-11.
+Wave B (P4, P4b, P5, P6) is done. Wave C is engine + all three front-ends, like the L slices:
 
-**P6 · Tray + toasts** (M) — minimise-to-tray, Windows toasts for fills / margin calls / black
-swans while hidden. The idle-friendly north star, delivered. **Next in Wave B.** The cue
-derivation P5 built (`sound.advance_cue`, one event per advance, priority-ordered) is exactly the
-"what deserves a toast" question too — reuse it rather than deriving twice.
+**P7 · Blotter core** (M) — record every fill (manual, triggered, liquidation) on the portfolio:
+tick, side, qty, price, fee, realized P&L. Serialized with saves, **back-compat** with the saves
+already out there (see `test_version_guard.py` for how the format is guarded). Unblocks P8
+(blotter UI) and P9 (stats + market-close recap). The seam is the same one everything else uses:
+every fill already passes through `execute_order` / `process_pending` / `liquidate_for_margin`,
+and `TraderApp._advance` sees all three kinds in one place.
+
+Then **P10 · Price alerts** (S/M) — a notify-only resting kind; `is_triggered` does the hard
+part, and P6's toast + P5's cue are the notification, already built.
 
 ### 2. Or jump the queue
 
 **P14 · Theme presets + CRT scanlines** (S/M) — unblocked since P2; presets are just named accents
-passed to `TraderGUI.set_accent()`.
+passed to `TraderGUI.set_accent()`. The tray icon already repaints on an accent change.
+
+**P15 · Icon, About, exe diet** (M) — P6's `tray_icon()` is a painted `$` on the dark ground; the
+candlestick icon P15 wants is the same trick with a different drawing, and it should become the
+window + tray + exe icon in one go.
 
 ### Small thing noticed, not filed
 
