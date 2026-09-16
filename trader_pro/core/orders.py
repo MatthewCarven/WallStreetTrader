@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from .blotter import Fill, fill_action
 from .portfolio import INITIAL_MARGIN_RATIO, MAINTENANCE_MARGIN_RATIO
 
 # Brokerage commission per fill, as a fraction of the traded notional. Charged on BOTH legs of
@@ -75,6 +76,7 @@ class ExecutionResult:
     realized_pnl: float = 0.0
     fee: float = 0.0
     message: str = ""
+    fill: "Fill | None" = None    # the blotter row this wrote (P7); None when not filled
 
     def __bool__(self) -> bool:
         return self.filled
@@ -132,8 +134,12 @@ class PlacementResult:
         return self.ok
 
 
-def execute_order(world: "World", order: Order) -> ExecutionResult:
-    """Execute a market order against `world`, mutating its portfolio on success."""
+def execute_order(world: "World", order: Order, source: str = "manual") -> ExecutionResult:
+    """Execute a market order against `world`, mutating its portfolio on success.
+
+    `source` is written to the blotter row (P7): ``"manual"`` for the player's own trades; the
+    resting-order and liquidation paths below pass their own. Every fill in the game comes
+    through here, so this is the one place a `Fill` is recorded."""
     if order.quantity <= 0:
         return ExecutionResult(False, order, message="quantity must be positive")
     if not world.has_asset(order.asset_id):
@@ -173,8 +179,12 @@ def execute_order(world: "World", order: Order) -> ExecutionResult:
         verb = "opened short"
     elif q0 < 0 and q1 >= 0:
         verb = "covered"
+    fill = Fill(tick=world.market.tick_index, asset_id=order.asset_id, side=order.side,
+                action=fill_action(order.side, q0), quantity=order.quantity, price=price,
+                fee=fee, realized_pnl=realized, source=source)
+    pf.fills.append(fill)
     return ExecutionResult(True, order, price=price, cash_delta=cash_delta,
-                           realized_pnl=realized, fee=fee, message=verb)
+                           realized_pnl=realized, fee=fee, message=verb, fill=fill)
 
 
 def infer_order_kind(side: OrderSide, trigger: float, price: float) -> OrderKind:
@@ -237,7 +247,7 @@ def process_pending(world: "World") -> list[ExecutionResult]:
         if not world.has_asset(o.asset_id) or not o.is_triggered(world.price(o.asset_id)):
             still_resting.append(o)
             continue
-        res = execute_order(world, Order(o.asset_id, o.side, o.quantity))
+        res = execute_order(world, Order(o.asset_id, o.side, o.quantity), source=o.kind.value)
         res.message = (f"{o.kind.value} filled" if res.filled
                        else f"{o.kind.value} cancelled: {res.message}")
         results.append(res)
@@ -268,7 +278,7 @@ def liquidate_for_margin(world: "World") -> list[ExecutionResult]:
         if close_qty <= 0:                       # numerical safety: always make progress
             close_qty = pos_qty
         side = OrderSide.BUY if pf.positions[aid].quantity < 0 else OrderSide.SELL
-        res = execute_order(world, Order(aid, side, close_qty))
+        res = execute_order(world, Order(aid, side, close_qty), source="liquidation")
         res.message = "margin liquidation"
         closures.append(res)
     return closures

@@ -13,6 +13,7 @@ from .models import (
     load_seed_universe,
 )
 from .portfolio import Portfolio, Position
+from .blotter import Fill, fill_action
 from .orders import (
     Order, OrderSide, OrderKind, ExecutionResult, PendingOrder, PlacementResult,
     execute_order, place_pending, cancel_pending, process_pending, liquidate_for_margin,
@@ -57,6 +58,8 @@ __all__ = [
     "load_seed_universe",
     "Portfolio",
     "Position",
+    "Fill",
+    "fill_action",
     "Order",
     "OrderSide",
     "OrderKind",

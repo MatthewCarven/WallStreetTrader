@@ -3,7 +3,7 @@
 Short, current, and disposable. The **full backlog lives in [`design.md` §11](design.md)**; this
 file is just "where we stopped and what to do next", so the two never drift apart.
 
-Last touched: **2026-09-15**. This line used to name the last pushed commit, which made it stale
+Last touched: **2026-09-16**. This line used to name the last pushed commit, which made it stale
 the moment anything else landed — twice in one session. It doesn't any more: **ask git**
 (`git status`, or `git log --oneline origin/master..HEAD` for exactly what's waiting). Pushes stay
 Matthew's to run.
@@ -12,7 +12,7 @@ Matthew's to run.
 
 ## State right now
 
-**Waves A and B complete.** **244 tests pass** (`QT_QPA_PLATFORM=offscreen python -m pytest`),
+**Waves A and B complete; Wave C open (P7 done).** **258 tests pass** (`QT_QPA_PLATFORM=offscreen python -m pytest`),
 working tree clean.
 
 * **P4 · Price flash (GUI)** — a Price cell tints green on an up-tick, red on a down-tick, fading
@@ -42,6 +42,12 @@ working tree clean.
   close still quits; the tray menu is Show / Play-Pause / Quit. `gui_p6_tray.png`. **Matthew to
   try in anger**: turn it on, minimise, rest a stop, walk away — the toast attribution reads as
   the Python interpreter's until P15 gives the exe an identity of its own.
+* **P7 · Blotter core — COMPLETE (2026-09-16).** `core/blotter.py` `Fill` (tick, asset, side,
+  **action** buy/sell/short/cover, qty, price, fee, realized P&L gross of fee, **source**
+  manual/limit/stop/liquidation), written in `execute_order` — the one path every fill takes —
+  onto `Portfolio.fills`, oldest first, never trimmed. `ExecutionResult.fill` is the row.
+  Additive in the save; the six real saves on disk load with an empty blotter. Invariant P9
+  leans on: Σ `net_pnl` == `realized_pnl`. Nothing player-visible yet — that's P8.
 
 ### Three things worth remembering from P3
 
@@ -58,14 +64,17 @@ working tree clean.
 
 ### 1. Wave C — trader QoL
 
-Wave B (P4, P4b, P5, P6) is done. Wave C is engine + all three front-ends, like the L slices:
+Wave B (P4, P4b, P5, P6) is done; P7 opened Wave C. Engine + all three front-ends, like the L slices:
 
-**P7 · Blotter core** (M) — record every fill (manual, triggered, liquidation) on the portfolio:
-tick, side, qty, price, fee, realized P&L. Serialized with saves, **back-compat** with the saves
-already out there (see `test_version_guard.py` for how the format is guarded). Unblocks P8
-(blotter UI) and P9 (stats + market-close recap). The seam is the same one everything else uses:
-every fill already passes through `execute_order` / `process_pending` / `liquidate_for_margin`,
-and `TraderApp._advance` sees all three kinds in one place.
+**P8 · Blotter UI** (M) — the blotter made visible: CLI `history [SYM] [n]`, a TUI screen (the
+OrdersScreen is the shape to copy), a GUI dialog + CSV export (`Fill.to_dict` is already the row;
+`csv.DictWriter` over it). Newest first; per-row `action` / `source` are the words to show, with
+`net_pnl` for the P&L column. The TUI news pane's clipping (below) is a TUI touch — fold it in.
+
+**P9 · Stats + market-close recap** (M) — lifetime fees / interest / realized P&L, biggest win &
+loss, max drawdown (already on the portfolio); a recap line in all three feeds at each sim-day
+close. Fees / realized come straight off the blotter (Σ `fee`, Σ `net_pnl`); interest needs a
+running counter in `accrue_interest`, which is the one thing the blotter doesn't see.
 
 Then **P10 · Price alerts** (S/M) — a notify-only resting kind; `is_triggered` does the hard
 part, and P6's toast + P5's cue are the notification, already built.
@@ -125,6 +134,11 @@ is still homeless — fold it into the next slice that touches the TUI.
   own process — and points `TRADER_PRO_SETTINGS_DIR` at the scratchpad first.
 * **Theming rule of thumb** (post-P2): read `THEME.accent` at *format* time, never snapshot it.
   Long-lived widgets get styled from `_style_panels()`, not inline. Modal dialogs are exempt.
+* **A mutation sweep can leave a stale `.pyc` behind.** Python invalidates bytecode on source
+  mtime *and size*; a mutation the same length as the original (`q0` → `q1`), written and
+  restored within the same second, leaves the mutated `.pyc` in `__pycache__` — and the next
+  "smoke" runs the mutant. Found in P7 when `short` and `cover` came out swapped from clean
+  source. Run sweeps with `PYTHONDONTWRITEBYTECODE=1` and clear `__pycache__` between edits.
 * **Pushes are Matthew's to run.** Commits from the session are fine (the top-level
   `CLAUDE.md` says so) — this note used to say both, from the cloud sessions where git wasn't
   usable at all. When a command *is* handed over, it's PowerShell: repeated `-m` flags, never a

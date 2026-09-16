@@ -2482,3 +2482,98 @@ the status note.
 **Known, not fixed:** the toast is attributed to the Python interpreter (a Windows toast is
 signed by the AppUserModelID of the process, and `python.exe` has its own). That resolves itself
 the day the exe has an identity — P15 — and isn't worth a WinRT dependency before then.
+
+## 2026-09-16 — P7 · Blotter core: every fill, on the record
+
+Wave C opens. P7 is the engine half of the blotter — nothing a player sees yet, but the thing
+P8 will show and P9 will sum. Small on purpose: one new module, one new field, one new argument.
+
+### What landed
+
+**`core/blotter.py`** — a `Fill` row: `tick`, `asset_id`, `side`, **`action`**, `quantity`,
+`price`, `fee`, `realized_pnl`, **`source`**. Two of those are the trader's words rather than the
+executor's:
+
+- `action` is what the fill *did to the position it hit* — `buy` / `sell` / `short` / `cover`,
+  from `fill_action(side, qty_before)`. A BUY against a short is a `cover` even when it flips the
+  position long (the cover is the part the trader meant); a SELL from flat or short is a `short`;
+  the rest are plain. The dialogs already speak these four words, and so does `sound.fill_cue`.
+- `source` is who pulled the trigger — `manual`, `limit`, `stop` (the resting order's
+  `OrderKind.value`) or `liquidation`.
+
+`realized_pnl` is **gross of `fee`** so the two report side by side; `net_pnl` is what actually
+hit the tally, and Σ `net_pnl` over the blotter equals `Portfolio.realized_pnl` — the invariant P9
+will lean on, pinned by a test that runs five fills through both books.
+
+**Where it's written**: `execute_order`, and only there — every fill in the game already passes
+through it. It grew a `source="manual"` keyword; `process_pending` passes `o.kind.value` and
+`liquidate_for_margin` passes `"liquidation"`, right where they were already relabelling
+`res.message`. `ExecutionResult.fill` points at the row (None when nothing filled), so a caller
+holding a result can find its blotter entry without searching.
+
+**Where it lives**: `Portfolio.fills`, oldest first, **never trimmed**. `nw_history` halves itself
+past 240 points because it's a chart; a blotter with holes in it is worse than no blotter, and
+fills happen at human rate — a long campaign is a few thousand rows at ~180 bytes each.
+
+**Save format**: additive. `"fills"` is a new key in the portfolio dict; `from_dict` defaults it
+to `[]`, so a pre-P7 save loads with an empty blotter and `schema_version` stays 1. The six real
+saves in `saves/` were loaded read-only to prove it (all six, empty blotters, nothing written).
+
+**Import shape**: `orders` → `blotter` at module level; `blotter` never imports `orders` at
+module level (a `TYPE_CHECKING` guard for the annotation, a local import in `from_dict`), and
+`Portfolio.from_dict` does the same local-import dance it already did for `PendingOrder`.
+`fill_action` compares `side == "buy"` — `OrderSide` is a str enum — so it needs no import at all.
+
+### Tests
+
+**258 pass** (was 244). `test_blotter.py` +14: `fill_action` across all six position states · a
+manual fill writes one row with the execution facts (tick, asset, side, action, qty, price,
+fee, source) and `res.fill` is that row · a closing fill carries realized P&L gross of fee and
+`net_pnl` is realized − fee · short / short / cover naming through a flip · rejected orders
+(unaffordable, bad qty, unknown asset) write nothing · Σ `net_pnl` == `realized_pnl` over five
+mixed fills with `high` fees · fired resting orders are tagged `limit` / `stop` · a trigger-time
+cancellation writes nothing · liquidations are tagged, named `cover`, and carry their loss ·
+`TraderApp._advance` records the fill at the advance's tick · `Fill` round-trips through its
+dict · the portfolio saves and loads the blotter · a pre-P7 blob loads with an empty blotter and
+a bare-essentials row fills in its defaults · a real save file round-trips with the enum intact.
+
+**Ten mutations, ten catches**, each failing in the test named for it: drop either `source`
+tag · record net instead of gross · record tick 0 · name the action from the position *after*
+the fill · collapse `cover` into `buy` · call a sell-from-flat a `sell` · drop the `fills` key from
+either direction of the serialization · make `net_pnl` ignore the fee.
+
+### The trap the sweep sprang
+
+The first sweep also said 10/10 — and the CLI smoke that followed printed the `short` row as
+`sell`... no: printed a *sell* as `short` and a *cover* as `buy`, from source that was
+demonstrably correct when called directly. **Stale bytecode.** Python invalidates a `.pyc` on
+source mtime and size; the `q0 → q1` mutation is the same length as the original, and the sweep
+wrote and restored it within one second, so the mutant's `.pyc` survived in `__pycache__` and
+the smoke ran it. That also means the first sweep's ten catches were partly the *previous*
+mutant failing — unsound. Rerun with `PYTHONDONTWRITEBYTECODE=1` and `__pycache__` cleared
+before each edit: still 10/10, now trustworthy, and each failure lands in the right test. Noted
+in the TODO working notes; it will bite again otherwise.
+
+### Smoke
+
+CLI, muted, settings untouched: `buy A 10 · next 30 · sell A 4 · short A 20 · next 5 · cover A
+20`, then a buy-stop rested in the money and one more advance:
+
+```
+t=  0 buy    A     10.00 @    78.32 fee   2.35 pnl    +0.00 [manual]
+t= 30 sell   A      4.00 @    79.75 fee   0.96 pnl    +5.73 [manual]
+t= 30 sell   A     20.00 @    79.75 fee   4.79 pnl    +8.60 [manual]
+t= 35 cover  A     14.00 @    79.83 fee   3.35 pnl    -1.10 [manual]
+t= 36 buy    A      3.00 @    79.87 fee   0.72 pnl    +0.00 [stop]
+sum net 1.07105 == realized 1.07105
+```
+
+Saved to the scratchpad and reloaded equal. The third row is the naming rule in the wild: `short
+A 20` while long 6 sold the 6 and opened a 14 short, and the blotter calls it a `sell` — the
+position it hit was long. The CLI said "shorted 20"; both are true, and the row's `+8.60` says
+which part the trader was paid for.
+
+### Next
+
+**P8 · Blotter UI** — `history` in the CLI, a TUI screen shaped like OrdersScreen, a GUI dialog
+with CSV export (`Fill.to_dict` is the row). Then P9 sums it.

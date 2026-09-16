@@ -539,8 +539,14 @@ should reach the TUI on day one rather than as a follow-up. See P4b.)*
 
 **Wave C — trader QoL** *(engine + all three front-ends, exactly like the L slices)*
 
-- [ ] **P7 · Blotter core** (M) — record every fill (manual, triggered, liquidation) on the
-  portfolio: tick, side, qty, price, fee, realized P&L. Serialized with saves, back-compat.
+- [x] **P7 · Blotter core** (M) — **done 2026-09-16.** `core/blotter.py`: a `Fill` row (tick,
+  asset, side, **action** buy/sell/short/cover, qty, price, fee, realized P&L gross of fee,
+  **source** manual/limit/stop/liquidation) written in the one place every fill passes —
+  `execute_order`, which grew a `source` argument that `process_pending` and
+  `liquidate_for_margin` set. `Portfolio.fills`, oldest first, never trimmed (fills are
+  human-rate; a blotter with holes is worse than none); `ExecutionResult.fill` points at the
+  row. Additive in the save (`"fills"`, absent in older saves → empty blotter, schema
+  version unchanged). Invariant for P9: Σ `net_pnl` over the blotter == `realized_pnl`.
 - [ ] **P8 · Blotter UI** (M) — CLI `history`, a TUI screen, a GUI dialog + CSV export.
 - [ ] **P9 · Stats + market-close recap** (M) — lifetime fees / interest / realized P&L, biggest
   win & loss, max drawdown; a recap line in all three feeds at each sim-day close.

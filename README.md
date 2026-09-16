@@ -219,6 +219,7 @@ trader_pro/                the Python package (engine, front-ends, save/load)
     profiles.py            the 8 market personalities + their coefficients
     portfolio.py           positions, cash, margin, loans, net-worth history
     orders.py              buy/sell/short/cover, resting stop/limit orders, margin checks, fees, forced liquidation
+    blotter.py             the fill record (P7): every fill, tagged manual / limit / stop / liquidation, saved with the world
     events.py              seeded events, black swans & crash cascades
     predictions.py         buyable, seeded price forecasts
   cli.py                   the text front-end (TraderApp)
@@ -237,7 +238,7 @@ scripts/
   build_seed.py            regenerates the seed files (deterministic)
   render_sounds.py         renders sounds/patches/*.json to WAVs (needs PySynthRack's venv, build-time only)
   validate_engine.py, compare_profiles.py, cascade_demo.py, …   headless validation & charts
-tests/                     244 tests across 39 files
+tests/                     258 tests across 40 files
 docs/freeze-bug/           the Textual-regression investigation
 saves/                     runtime world saves (gitignored)
 ```
@@ -259,10 +260,10 @@ comes from the simulation, not the seed.
 ## Tests
 
 ```bash
-python -m pytest          # 244 tests across 39 files
+python -m pytest          # 258 tests across 40 files
 ```
 
-Covers seed determinism, the world model, orders (market + resting stop/limit), margin/short
+Covers seed determinism, the world model, orders (market + resting stop/limit), the blotter, margin/short
 behaviour, the event system, loans, predictions, profiles, persistence, GUI session memory, sound
 cues, the tray + toasts, and all three front-ends. The Qt tests run offscreen in subprocesses and skip when PySide6 is
 absent. The suite is **muted** (`TRADER_PRO_MUTE`, set in `conftest.py`) so a green run is a silent one. The two trade-dialog freeze tests are

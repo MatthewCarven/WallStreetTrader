@@ -90,6 +90,8 @@ class Portfolio:
     # resting stop/limit orders (design.md §8.1) — checked each advance by orders.process_pending
     pending: list = field(default_factory=list)
     next_order_id: int = 1           # monotonic id source; serialized so ids stay unique across saves
+    # the blotter (P7): every fill, oldest first, written by orders.execute_order. Never trimmed.
+    fills: list = field(default_factory=list)
 
     # ------------------------------------------------------------------ #
     # Fills — the one mutation path (cash is handled by the order executor)
@@ -251,11 +253,13 @@ class Portfolio:
             "swans_survived": self.swans_survived,
             "pending": [o.to_dict() for o in self.pending],
             "next_order_id": self.next_order_id,
+            "fills": [f.to_dict() for f in self.fills],
         }
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> "Portfolio":
-        from .orders import PendingOrder   # local import: breaks the orders<->portfolio cycle
+        from .blotter import Fill          # local imports: break the orders<->portfolio cycle
+        from .orders import PendingOrder
         return Portfolio(
             cash=d["cash"],
             realized_pnl=d.get("realized_pnl", 0.0),
@@ -267,4 +271,5 @@ class Portfolio:
             swans_survived=d.get("swans_survived", 0),
             pending=[PendingOrder.from_dict(od) for od in d.get("pending", [])],
             next_order_id=d.get("next_order_id", 1),
+            fills=[Fill.from_dict(fd) for fd in d.get("fills", [])],   # absent in pre-P7 saves
         )
